@@ -1,0 +1,8 @@
+markprice.options.btc_usd
+markprice.options.eth_usd
+deribit_price_index.eth_usd
+deribit_price_index.btc_usd
+deribit_volatility_index.eth_usd
+deribit_volatility_index.btc_usd
+deribit_price_statistics.btc_usd
+deribit_price_statistics.eth_usd
