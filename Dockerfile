@@ -3,6 +3,8 @@
 FROM clux/muslrust:stable AS chef
 USER root
 
+ENV ALL_PROXY=
+
 RUN mkdir -p /root/.cargo && \
     tee /root/.cargo/config.toml <<EOF
 [source.crates-io]
