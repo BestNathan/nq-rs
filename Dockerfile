@@ -1,8 +1,9 @@
-ARG APP
-ARG PROXY
-
 # Using the `rust-musl-builder` as base image, instead of 
 # the official Rust toolchain
+
+################
+# stage for chef
+################
 FROM clux/muslrust:stable AS chef
 USER root
 
@@ -21,19 +22,30 @@ EOF
 RUN cargo install cargo-chef
 WORKDIR /app
 
+################
+# stage for chef planner
+################
 FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
+################
+# stage for builder
+################
 FROM chef AS builder
-
+ARG APP
 COPY --from=planner /app/recipe.json recipe.json
 # Notice that we are specifying the --target flag!
 RUN cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --target x86_64-unknown-linux-musl --bin $APP
 
+################
+# stage for runtime
+################
 FROM alpine:3.20.1 AS runtime
+ARG APP
+ARG PROXY
 ENV APP=$APP
 ENV PROXY=$PROXY
 RUN addgroup -S nqrs && adduser -S nqrs -G nqrs
