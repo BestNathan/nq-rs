@@ -1,9 +1,13 @@
 use std::{cell::RefCell, sync::Arc, time::Duration};
 
 use runner::Runner;
-use tokio::{select, signal, sync::oneshot, time::timeout};
+use tokio::{
+    select, signal,
+    sync::{mpsc, oneshot},
+    time::timeout,
+};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use tracing::{debug, trace, warn};
+use tracing::{debug, warn};
 
 pub mod runner;
 
@@ -27,18 +31,21 @@ impl Application {
     pub async fn run(&self, canceltoken: CancellationToken) {
         debug!("application start running");
         let tt = self.task_tracker.clone();
+        let (errtx, mut errrx) = mpsc::channel(1);
 
         for runner in self.runners.borrow().iter() {
             let canceltoken = canceltoken.clone();
             let runner = Arc::clone(runner);
             let runner_name = runner.name();
+            let tx = errtx.clone();
 
             debug!("application spawn runner: {runner_name:}");
 
             tt.spawn(async move {
                 match runner.run(canceltoken).await {
                     Err(error) => {
-                        warn!(runner = runner_name, ?error, "runner error")
+                        warn!(runner = runner_name, ?error, "runner error");
+                        tx.send(()).await.unwrap_or_default();
                     }
                     Ok(()) => {}
                 };
@@ -50,33 +57,35 @@ impl Application {
         debug!("application is running");
 
         select! {
+            _ = errrx.recv() => {
+                debug!("application recv runner error");
+            }
             _ = canceltoken.cancelled() => {
                 debug!("application recv cancelling");
             }
             _ = signal::ctrl_c() => {
                 debug!("application recv ctrl-c");
-
-                if !canceltoken.is_cancelled() {
-                    canceltoken.cancel();
-                }
             }
             _ = tt.wait() => {
-                debug!("application done for all task done");
-                return;
+                debug!("application recv all tasks done");
             }
         }
 
-        trace!("application waiting for tasks done");
+        if !canceltoken.is_cancelled() {
+            canceltoken.cancel();
+        }
+
+        debug!("application waiting for tasks done");
 
         let (tx, rx) = oneshot::channel::<()>();
 
         select! {
             _ = tt.wait() => {
-                trace!("application all task done");
+                debug!("application all task done");
                 tx.send(()).unwrap_or_default();
             }
             _ = timeout(Duration::from_secs(3), rx) => {
-                trace!("application waiting for all task timeout");
+                debug!("application waiting for all tasks timeout");
             }
         }
 

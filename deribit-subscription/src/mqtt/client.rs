@@ -1,16 +1,11 @@
-use std::{sync::Arc, time::Duration};
-
 use anyhow::Result;
-use application::{runner::Runner, Application};
+use application::runner::Runner;
 use async_trait::async_trait;
-use futures_util::lock::Mutex;
 use rand::{distr::Alphanumeric, rng, Rng};
 use rumqttc::{AsyncClient, EventLoop, MqttOptions};
-use serde_json::json;
-use tokio::{select, signal, sync::broadcast, time::sleep};
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use tracing::{debug, info, trace, warn, Level};
-use tracing_subscriber::{field::debug, FmtSubscriber};
+use tokio::select;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, info, warn};
 
 fn random_string(length: usize) -> String {
     rng()
@@ -33,9 +28,11 @@ impl Client {
             let canceltoken = canceltoken.clone();
             let mut eventloop = eventloop;
             tokio::spawn(async move {
+                debug!("mqtt client start eventloop");
+
                 loop {
                     select! {
-                        _ = canceltoken.cancelled() => return,
+                        _ = canceltoken.cancelled() => break,
                         res = eventloop.poll() => {
                             match res {
                                 Ok(notification) => {
@@ -48,6 +45,8 @@ impl Client {
                         }
                     }
                 }
+
+                debug!("mqtt client eventloop done");
             });
         }
 
@@ -69,12 +68,16 @@ impl Client {
 #[async_trait]
 impl Runner for Client {
     async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
+        info!("mqtt client is running");
+
         canceltoken.cancelled().await;
+        info!("mqtt client recv cancelling");
 
         if !self.canceltoken.is_cancelled() {
             self.canceltoken.cancel();
         }
 
+        info!("mqtt client done");
         Ok(())
     }
 }
@@ -140,44 +143,56 @@ impl ClientBuilder {
     }
 }
 
-#[tokio::test]
-async fn test_base_client() {
-    std::env::set_var("RUST_LOG", "debug");
-    tracing_subscriber::fmt::try_init().unwrap_or_default();
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
 
-    let canceltoken = CancellationToken::new();
-    let application = Application::new();
+    use application::Application;
+    use serde_json::json;
+    use tokio::time::sleep;
+    use tokio_util::sync::CancellationToken;
 
-    let client = Client::builder()
-        .set_host("192.168.2.106".to_string())
-        .set_port(1883)
-        .build();
+    use crate::mqtt::client::Client;
 
-    let ac = client.inner();
+    #[tokio::test]
+    async fn test_base_client() {
+        std::env::set_var("RUST_LOG", "debug");
+        tracing_subscriber::fmt::try_init().unwrap_or_default();
 
-    {
-        let token = canceltoken.clone();
-        tokio::spawn(async move {
-            ac.publish(
-                "hello/world",
-                rumqttc::QoS::AtLeastOnce,
-                true,
-                json!({
-                    "key": "hello",
-                    "value": "world",
-                })
-                .to_string(),
-            )
-            .await
-            .unwrap();
+        let canceltoken = CancellationToken::new();
+        let application = Application::new();
 
-            sleep(Duration::from_secs(3)).await;
+        let client = Client::builder()
+            .set_host("192.168.2.106".to_string())
+            .set_port(1883)
+            .build();
 
-            token.cancel();
-        });
+        let ac = client.inner();
+
+        {
+            let token = canceltoken.clone();
+            tokio::spawn(async move {
+                ac.publish(
+                    "hello/world",
+                    rumqttc::QoS::AtLeastOnce,
+                    true,
+                    json!({
+                        "key": "hello",
+                        "value": "world",
+                    })
+                    .to_string(),
+                )
+                .await
+                .unwrap();
+
+                sleep(Duration::from_secs(3)).await;
+
+                token.cancel();
+            });
+        }
+
+        application.add_runner(Arc::new(client));
+
+        application.run(canceltoken).await;
     }
-
-    application.add_runner(Arc::new(client));
-
-    application.run(canceltoken).await;
 }

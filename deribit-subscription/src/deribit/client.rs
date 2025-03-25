@@ -9,7 +9,7 @@ use reqwest::Proxy;
 use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
 
 use crate::{deribit::message::WebsocketMessage, env};
 
@@ -67,19 +67,19 @@ impl Client {
 #[async_trait]
 impl Runner for Client {
     async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
-        debug!("deribit client is connecting websocket");
+        info!("deribit client is connecting websocket");
 
         let mut ws = select! {
             ws = self.connect() => ws?,
             _ = canceltoken.cancelled() => return Ok(())
         };
 
-        debug!("deribit client is running");
+        info!("deribit client is running");
 
         loop {
             select! {
                 () = canceltoken.cancelled() => {
-                    debug!("deribit client recv canceling");
+                    debug!("deribit client recv cancelling");
                     break;
                 },
                 Ok(msg_to_send) = self.message_rx.recv_async() => {
@@ -89,7 +89,7 @@ impl Runner for Client {
                     let message = match next {
                         Some(m) => {m}
                         None => {
-                            trace!("deribit client not have next message");
+                            debug!("deribit client not have next message");
                             break;
                         },
                     }?;
@@ -97,7 +97,7 @@ impl Runner for Client {
                     let text = match message {
                         Message::Text(text) => {text}
                         _ => {
-                            trace!("deribit client recv non text message: {:?}", message);
+                            debug!("deribit client recv non text message: {:?}", message);
                             continue;
                         }
                     };
@@ -112,10 +112,10 @@ impl Runner for Client {
                                 }
                             }
                             WebsocketMessage::ResultMessage(result) => {
-                                trace!("deribit client recv result message: {:?}", result)
+                                debug!("deribit client recv result message: {:?}", result)
                             }
                             WebsocketMessage::Other(val) => {
-                                trace!("deribit client recv other message: {:?}", val.to_string())
+                                debug!("deribit client recv other message: {:?}", val.to_string())
                             }
                         },
                         Err(error) => {
@@ -133,7 +133,7 @@ impl Runner for Client {
             self.canceltoken.cancel();
         }
 
-        debug!("deribit client done");
+        info!("deribit client done");
 
         Ok(())
     }
@@ -253,54 +253,65 @@ impl Default for ClientBuilder {
     }
 }
 
-#[tokio::test]
-async fn test_ws_base_client() {
-    std::env::set_var("RUST_LOG", "debug");
-    tracing_subscriber::fmt::try_init().unwrap_or_default();
+#[cfg(test)]
+mod tests {
+    use application::runner::Runner;
+    use reqwest::Proxy;
+    use tokio::select;
+    use tokio_util::sync::CancellationToken;
+    use tracing::debug;
 
-    let client = Client::builder()
-        .set_proxy(Proxy::all("http://192.168.2.98:8890").unwrap())
-        .build()
-        .unwrap();
+    use crate::deribit::client::Client;
 
-    let (writer, subscriber) = client.split();
+    #[tokio::test]
+    async fn test_ws_base_client() {
+        std::env::set_var("RUST_LOG", "debug");
+        tracing_subscriber::fmt::try_init().unwrap_or_default();
 
-    let tt = tokio_util::task::TaskTracker::new();
-    let canceltoken = CancellationToken::new();
+        let client = Client::builder()
+            .set_proxy(Proxy::all("http://192.168.2.98:8890").unwrap())
+            .build()
+            .unwrap();
 
-    {
-        let token = canceltoken.clone();
-        tt.spawn(async move {
-            writer
-                .subscribe(vec!["markprice.options.btc_usd".into()])
-                .await
-                .unwrap();
+        let (writer, subscriber) = client.split();
 
-            loop {
-                select! {
-                    () = token.cancelled() => {
-                        break;
-                    },
-                    msg = subscriber.recv() => {
-                        match msg {
-                            Some(smsg) => {
-                                info!(method = smsg.method, "recv subscription message")
-                            },
-                            None => break,
+        let tt = tokio_util::task::TaskTracker::new();
+        let canceltoken = CancellationToken::new();
+
+        {
+            let token = canceltoken.clone();
+            tt.spawn(async move {
+                writer
+                    .subscribe(vec!["markprice.options.btc_usd".into()])
+                    .await
+                    .unwrap();
+
+                loop {
+                    select! {
+                        () = token.cancelled() => {
+                            break;
+                        },
+                        msg = subscriber.recv() => {
+                            match msg {
+                                Some(smsg) => {
+                                    debug!(method = smsg.method, "recv subscription message")
+                                },
+                                None => break,
+                            }
                         }
                     }
                 }
-            }
-        });
-    }
+            });
+        }
 
-    {
-        let token = canceltoken.clone();
-        tt.spawn(async move {
-            client.run(token).await.unwrap();
-        });
-    }
+        {
+            let token = canceltoken.clone();
+            tt.spawn(async move {
+                client.run(token).await.unwrap();
+            });
+        }
 
-    tt.close();
-    tt.wait().await;
+        tt.close();
+        tt.wait().await;
+    }
 }
