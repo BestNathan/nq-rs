@@ -1,8 +1,10 @@
 use std::{cell::RefCell, sync::Arc};
 
 use anyhow::Result;
+use application::runner::Runner;
+use async_trait::async_trait;
 use flume::{Receiver, Sender};
-use futures_util::{SinkExt, TryStreamExt};
+use futures_util::{SinkExt, StreamExt};
 use reqwest::Proxy;
 use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
 use tokio::select;
@@ -31,7 +33,7 @@ impl Client {
         }
     }
 
-    async fn connect(&mut self) -> Result<WebSocket> {
+    async fn connect(&self) -> Result<WebSocket> {
         let res = self
             .inner_client
             .get(self.config.url.clone())
@@ -60,58 +62,78 @@ impl Client {
             MessageSubscriber::new(self.canceltoken.clone(), self.subscription_rx.clone()),
         )
     }
+}
 
-    pub async fn run(&mut self, canceltoken: CancellationToken) -> Result<()> {
+#[async_trait]
+impl Runner for Client {
+    async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
+        debug!("deribit client is connecting websocket");
+
         let mut ws = select! {
             ws = self.connect() => ws?,
             _ = canceltoken.cancelled() => return Ok(())
         };
 
+        debug!("deribit client is running");
+
         loop {
             select! {
                 () = canceltoken.cancelled() => {
-                    debug!("websocket client stopped by canceling");
+                    debug!("deribit client recv canceling");
                     break;
                 },
                 Ok(msg_to_send) = self.message_rx.recv_async() => {
                     let _ = ws.send(msg_to_send).await;
                 },
-                msg = ws.try_next() => {
-                    if let Some(message) = msg.unwrap() {
-                        match message {
-                            Message::Text(text) => {
-                                match serde_json::from_str::<WebsocketMessage>(&text) {
-                                    Ok(json) => match json {
-                                        WebsocketMessage::SubscriptionMessage(submsg) => {
-                                            if submsg.method == "heartbeat" {
-                                                let _ = self.message_tx.send_async(Message::Text(self.ma.test_message())).await;
-                                            } else {
-                                                let _ = self.subscription_tx.send_async(submsg).await;
-                                            }
-                                        }
-                                        WebsocketMessage::ResultMessage(result) => {
-                                            trace!("recv result message: {:?}", result)
-                                        }
-                                        WebsocketMessage::Other(val) => {
-                                            trace!("other message: {:?}", val.to_string())
-                                        }
-                                    },
-                                    Err(err) => {
-                                        warn!("parse subscription message fail, reason {}", err);
-                                    }
-                                };
-                            }
-                            _ => {
-                                trace!("non text message: {:?}", message)
-                            }
+                next = ws.next() => {
+                    let message = match next {
+                        Some(m) => {m}
+                        None => {
+                            trace!("deribit client not have next message");
+                            break;
+                        },
+                    }?;
+
+                    let text = match message {
+                        Message::Text(text) => {text}
+                        _ => {
+                            trace!("deribit client recv non text message: {:?}", message);
+                            continue;
                         }
-                    }
+                    };
+
+                    match serde_json::from_str::<WebsocketMessage>(&text) {
+                        Ok(json) => match json {
+                            WebsocketMessage::SubscriptionMessage(submsg) => {
+                                if submsg.method == "heartbeat" {
+                                    let _ = self.message_tx.send_async(Message::Text(self.ma.test_message())).await;
+                                } else {
+                                    let _ = self.subscription_tx.send_async(submsg).await;
+                                }
+                            }
+                            WebsocketMessage::ResultMessage(result) => {
+                                trace!("deribit client recv result message: {:?}", result)
+                            }
+                            WebsocketMessage::Other(val) => {
+                                trace!("deribit client recv other message: {:?}", val.to_string())
+                            }
+                        },
+                        Err(error) => {
+                            warn!(?error, "deribit client parse websocket message fail");
+                            return Err(error.into())
+                        }
+                    };
+
                 }
             }
         }
 
         // clear
-        self.canceltoken.cancel();
+        if !self.canceltoken.is_cancelled() {
+            self.canceltoken.cancel();
+        }
+
+        debug!("deribit client done");
 
         Ok(())
     }
@@ -162,7 +184,7 @@ impl MessageSubscriber {
                 match msg {
                     Ok(msg) => Some(msg),
                     Err(e) => {
-                        trace!("deribit client subscription recv err: {:?}", e);
+                        warn!(error = ?e, "deribit client subscription recv fail");
                         None
                     }
                 }
@@ -234,9 +256,9 @@ impl Default for ClientBuilder {
 #[tokio::test]
 async fn test_ws_base_client() {
     std::env::set_var("RUST_LOG", "debug");
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt::try_init().unwrap_or_default();
 
-    let mut client = Client::builder()
+    let client = Client::builder()
         .set_proxy(Proxy::all("http://192.168.2.98:8890").unwrap())
         .build()
         .unwrap();
@@ -262,7 +284,7 @@ async fn test_ws_base_client() {
                     msg = subscriber.recv() => {
                         match msg {
                             Some(smsg) => {
-                                info!("subscription message: {:?}", smsg)
+                                info!(method = smsg.method, "recv subscription message")
                             },
                             None => break,
                         }

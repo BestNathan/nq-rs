@@ -1,5 +1,9 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
+use anyhow::Result;
+use application::{runner::Runner, Application};
+use async_trait::async_trait;
+use futures_util::lock::Mutex;
 use rand::{distr::Alphanumeric, rng, Rng};
 use rumqttc::{AsyncClient, EventLoop, MqttOptions};
 use serde_json::json;
@@ -18,14 +22,38 @@ fn random_string(length: usize) -> String {
 
 pub struct Client {
     inner: AsyncClient,
-    eventloop: EventLoop,
+    canceltoken: CancellationToken,
 }
 
 impl Client {
     pub fn new(client: AsyncClient, eventloop: EventLoop) -> Self {
+        let canceltoken = CancellationToken::new();
+
+        {
+            let canceltoken = canceltoken.clone();
+            let mut eventloop = eventloop;
+            tokio::spawn(async move {
+                loop {
+                    select! {
+                        _ = canceltoken.cancelled() => return,
+                        res = eventloop.poll() => {
+                            match res {
+                                Ok(notification) => {
+                                    debug!("mqtt client poll notification: {:?}", notification)
+                                },
+                                Err(err) => {
+                                    warn!(error = ?err, "mqtt client eventloop poll fail")
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         Self {
             inner: client,
-            eventloop: eventloop,
+            canceltoken,
         }
     }
 
@@ -36,26 +64,18 @@ impl Client {
     pub fn inner(&self) -> AsyncClient {
         self.inner.clone()
     }
+}
 
-    pub async fn run(&mut self, cancel: CancellationToken) {
-        loop {
-            let _ = tokio::select! {
-                _ = cancel.cancelled() => {
-                    debug!("mqtt client stopped due to canceling");
-                    break;
-                },
-                res = self.eventloop.poll() => {
-                    match res {
-                        Ok(notification) => {
-                            debug!("mqtt client poll notification: {:?}", notification)
-                        },
-                        Err(err) => {
-                            warn!("mqtt eventloop recv err: {:?}", err)
-                        }
-                    }
-                }
-            };
+#[async_trait]
+impl Runner for Client {
+    async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
+        canceltoken.cancelled().await;
+
+        if !self.canceltoken.is_cancelled() {
+            self.canceltoken.cancel();
         }
+
+        Ok(())
     }
 }
 
@@ -122,64 +142,42 @@ impl ClientBuilder {
 
 #[tokio::test]
 async fn test_base_client() {
-    // a builder for `FmtSubscriber`.
-    let subscriber = FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(Level::TRACE)
-        // completes the builder.
-        .finish();
+    std::env::set_var("RUST_LOG", "debug");
+    tracing_subscriber::fmt::try_init().unwrap_or_default();
 
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    let canceltoken = CancellationToken::new();
+    let application = Application::new();
 
-    let mut client = Client::builder()
+    let client = Client::builder()
         .set_host("192.168.2.106".to_string())
         .set_port(1883)
         .build();
 
-    let canceltoken = CancellationToken::new();
-
-    client
-        .inner()
-        .try_publish(
-            "hello/world",
-            rumqttc::QoS::AtLeastOnce,
-            true,
-            json!({
-                "key": "hello",
-                "value": "world",
-            })
-            .to_string(),
-        )
-        .unwrap();
+    let ac = client.inner();
 
     {
         let token = canceltoken.clone();
         tokio::spawn(async move {
+            ac.publish(
+                "hello/world",
+                rumqttc::QoS::AtLeastOnce,
+                true,
+                json!({
+                    "key": "hello",
+                    "value": "world",
+                })
+                .to_string(),
+            )
+            .await
+            .unwrap();
+
             sleep(Duration::from_secs(3)).await;
+
             token.cancel();
         });
     }
 
-    let tt = TaskTracker::new();
+    application.add_runner(Arc::new(client));
 
-    {
-        let token = canceltoken.clone();
-        tt.spawn(async move { client.run(token).await });
-    }
-
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            info!("application quit with signaling");
-            canceltoken.cancel();
-        },
-        _ = canceltoken.cancelled() => {
-            info!("application quit with canceling");
-        },
-    }
-
-    tt.close();
-    tt.wait().await;
-
-    info!("application done!")
+    application.run(canceltoken).await;
 }

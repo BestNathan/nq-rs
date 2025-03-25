@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
 use anyhow::Result;
+use application::{runner::Runner, Application};
+use async_trait::async_trait;
 use deribit::message::SubscriptionParams;
 use rumqttc::{AsyncClient, QoS};
-use tokio::{select, signal};
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tokio::select;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 mod deribit;
@@ -18,8 +22,9 @@ struct App {
     mqtt_async_client: AsyncClient,
 }
 
-impl App {
-    async fn run(&self, canceltoken: CancellationToken) {
+#[async_trait]
+impl Runner for App {
+    async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
         info!("app is running...");
         info!("");
 
@@ -37,7 +42,7 @@ impl App {
 
         loop {
             select! {
-                _ = canceltoken.cancelled() => {break;},
+                _ = canceltoken.cancelled() => break,
                 msg = self.deribit_subscriber.recv() => {
                     match msg {
                         Some(ref smsg) => {
@@ -47,11 +52,12 @@ impl App {
                                 let payload = serde_json::to_string(&smsg).unwrap();
 
                                 self.mqtt_async_client.publish(
-                                    EMQX_TOPIC.to_owned(),
+                                    EMQX_TOPIC.to_string(),
                                     QoS::AtLeastOnce,
                                     true,
                                     payload,
-                                ).await.unwrap();
+                                ).await?;
+
                             };
                         },
                         None => {
@@ -61,6 +67,8 @@ impl App {
                 },
             }
         }
+
+        Ok(())
     }
 }
 
@@ -68,51 +76,29 @@ impl App {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let canceltoken = CancellationToken::new();
-    let tt = TaskTracker::new();
+    let application = Application::new();
 
-    let mut deribit_client = deribit::client::Client::builder().build()?;
+    let deribit_client = deribit::client::Client::builder().build()?;
     let (deribit_writer, deribit_subscriber) = deribit_client.split();
+    application.add_runner(Arc::new(deribit_client));
 
-    {
-        let canceltoken = canceltoken.clone();
-        tt.spawn(async move { deribit_client.run(canceltoken).await });
-    }
-
-    let mut mqtt_client = mqtt::client::Client::builder()
+    let mqtt_client = mqtt::client::Client::builder()
         .set_host(env::emqx_host())
         .build();
     let mqtt_async_client = mqtt_client.inner();
 
-    {
-        let canceltoken = canceltoken.clone();
-        tt.spawn(async move { mqtt_client.run(canceltoken).await });
-    }
+    application.add_runner(Arc::new(mqtt_client));
 
-    {
-        let canceltoken = canceltoken.clone();
-        let app = App {
-            deribit_writer,
-            deribit_subscriber,
-            mqtt_async_client,
-        };
+    let app = App {
+        deribit_writer,
+        deribit_subscriber,
+        mqtt_async_client,
+    };
 
-        select! {
-            _ = signal::ctrl_c() => {
-                info!("recv terminated signal...")
-            }
-            _ = tt.spawn(async move {
-                app.run(canceltoken).await;
-                info!("app done");
-            }) => {}
-        }
-    }
+    application.add_runner(Arc::new(app));
 
-    tt.close();
-    canceltoken.cancel();
-
-    info!("waiting for all task done");
-    tt.wait().await;
+    let canceltoken = CancellationToken::new();
+    application.run(canceltoken).await;
 
     Ok(())
 }
