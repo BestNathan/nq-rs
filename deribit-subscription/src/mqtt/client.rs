@@ -1,7 +1,7 @@
 use anyhow::Result;
 use application::runner::Runner;
 use async_trait::async_trait;
-use rand::{distr::Alphanumeric, rng, Rng};
+use rand::{Rng, distr::Alphanumeric, rng};
 use rumqttc::{AsyncClient, EventLoop, MqttOptions};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
@@ -156,7 +156,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_base_client() {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe {
+            std::env::set_var("RUST_LOG", "debug");
+        }
         tracing_subscriber::fmt::try_init().unwrap_or_default();
 
         let canceltoken = CancellationToken::new();

@@ -265,7 +265,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_base_client() {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe {
+            std::env::set_var("RUST_LOG", "debug");
+        }
         tracing_subscriber::fmt::try_init().unwrap_or_default();
 
         let client = Client::builder()
