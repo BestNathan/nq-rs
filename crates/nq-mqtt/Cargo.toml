@@ -1,12 +1,16 @@
 [package]
-edition = "2021"
-name = "application"
+edition = "2024"
+name = "nq-mqtt"
 version = "0.1.0"
 
 [dependencies]
 anyhow = {workspace = true}
 async-trait = {workspace = true}
-futures-util = {workspace = true}
+nq-app = {workspace = true}
+rand = "0.9.0"
+rumqttc = "0.24.0"
+serde = {workspace = true}
+serde_json = {workspace = true}
 tokio = {workspace = true}
 tokio-util = {workspace = true}
 tracing = {workspace = true}

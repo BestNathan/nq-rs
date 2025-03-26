@@ -9,7 +9,7 @@ use tokio::{
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::{debug, warn};
 
-pub mod runner;
+use crate::runner;
 
 pub struct Application {
     task_tracker: TaskTracker,
@@ -99,12 +99,14 @@ mod tests {
     use anyhow::Result;
     use async_trait::async_trait;
     use std::time::Duration;
-    use tokio::time::{sleep, Instant};
+    use tokio::time::{Instant, sleep};
     use tracing::info;
 
     #[tokio::test]
     async fn test_for_timeout() {
-        std::env::set_var("RUST_LOG", "trace");
+        unsafe {
+            std::env::set_var("RUST_LOG", "trace");
+        }
         tracing_subscriber::fmt::try_init().unwrap_or_default();
 
         struct TestRunner;
@@ -152,7 +154,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_for_normal() {
-        std::env::set_var("RUST_LOG", "trace");
+        unsafe {
+            std::env::set_var("RUST_LOG", "trace");
+        }
         tracing_subscriber::fmt::try_init().unwrap_or_default();
 
         struct TestRunner;
@@ -200,7 +204,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_for_all_task_done() {
-        std::env::set_var("RUST_LOG", "trace");
+        unsafe {
+            std::env::set_var("RUST_LOG", "trace");
+        }
         tracing_subscriber::fmt::try_init().unwrap_or_default();
 
         struct TestRunner;

@@ -1,30 +1,32 @@
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 use anyhow::Result;
-use application::{runner::Runner, Application};
 use async_trait::async_trait;
-use deribit::message::SubscriptionParams;
+use nq_app::{application::Application, runner::Runner};
+use nq_deribit::message::SubscriptionParams;
 use rumqttc::{AsyncClient, QoS};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{debug, info, warn};
 
-mod deribit;
-mod env;
-mod mqtt;
+const SUBSCRIPTION: &str = include_str!("../resources/subscription.txt");
+const DERIBIT_SUBSCRIPTION_TOPIC: &str = "t/deribit/subscription";
 
-const SUBSCRIPTION: &str = include_str!("../subscription.txt");
-const EMQX_TOPIC: &str = "t/deribit/subscription";
+fn deribit_subscription_topic() -> String {
+    env::var("DERIBIT_SUBSCRIPTION_TOPIC").unwrap_or(DERIBIT_SUBSCRIPTION_TOPIC.to_string())
+}
 
 struct App {
-    deribit_writer: deribit::client::MessageWriter,
-    deribit_subscriber: deribit::client::MessageSubscriber,
+    deribit_writer: nq_deribit::client::MessageWriter,
+    deribit_subscriber: nq_deribit::client::MessageSubscriber,
     mqtt_async_client: AsyncClient,
 }
 
 #[async_trait]
 impl Runner for App {
     async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
+        let topic = deribit_subscription_topic();
+
         info!("app is running...");
         info!("");
 
@@ -33,6 +35,12 @@ impl Runner for App {
             SUBSCRIPTION.replace("\n", ", ")
         );
         info!("");
+
+        if SUBSCRIPTION.len() == 0 {
+            warn!("no deribit subscriptions");
+            return Ok(());
+        }
+
         select! {
             _ = canceltoken.cancelled() => {},
             _ = async {
@@ -47,12 +55,12 @@ impl Runner for App {
                     match msg {
                         Some(ref smsg) => {
                             if let SubscriptionParams::Subscribe(p) = &smsg.params {
-                                info!("recv subscription message from channel: {:}", p.channel);
+                                debug!("recv subscription message from channel: {:}", p.channel);
 
                                 let payload = serde_json::to_string(&smsg).unwrap();
 
                                 self.mqtt_async_client.publish(
-                                    EMQX_TOPIC.to_string(),
+                                    topic.clone(),
                                     QoS::AtLeastOnce,
                                     true,
                                     payload,
@@ -61,6 +69,7 @@ impl Runner for App {
                             };
                         },
                         None => {
+                            info!("no more subscription messages");
                             break;
                         }
                     }
@@ -78,12 +87,12 @@ async fn main() -> Result<()> {
 
     let application = Application::new();
 
-    let deribit_client = deribit::client::Client::builder().build()?;
+    let deribit_client = nq_deribit::client::Client::builder().build()?;
     let (deribit_writer, deribit_subscriber) = deribit_client.split();
     application.add_runner(Arc::new(deribit_client));
 
-    let mqtt_client = mqtt::client::Client::builder()
-        .set_host(env::emqx_host())
+    let mqtt_client = nq_mqtt::client::Client::builder()
+        .set_host(nq_env::emqx::host())
         .build();
     let mqtt_async_client = mqtt_client.inner();
 

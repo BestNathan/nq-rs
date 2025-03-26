@@ -1,6 +1,6 @@
 use anyhow::Result;
-use application::runner::Runner;
 use async_trait::async_trait;
+use nq_app::runner::Runner;
 use rand::{Rng, distr::Alphanumeric, rng};
 use rumqttc::{AsyncClient, EventLoop, MqttOptions};
 use tokio::select;
@@ -147,12 +147,12 @@ impl ClientBuilder {
 mod tests {
     use std::{sync::Arc, time::Duration};
 
-    use application::Application;
+    use nq_app::application::Application;
     use serde_json::json;
     use tokio::time::sleep;
     use tokio_util::sync::CancellationToken;
 
-    use crate::mqtt::client::Client;
+    use crate::client::Client;
 
     #[tokio::test]
     async fn test_base_client() {

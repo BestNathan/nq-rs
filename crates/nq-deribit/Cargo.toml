@@ -1,18 +1,18 @@
 [package]
 edition = "2024"
-name = "deribit-subscription"
+name = "nq-deribit"
 version = "0.1.0"
 
 [dependencies]
 anyhow = {workspace = true}
-application = {path = "../application"}
 async-trait = {workspace = true}
 flume = {workspace = true}
 futures-util = {workspace = true}
+nq-app = {workspace = true}
+nq-env = {workspace = true}
 rand = "0.9.0"
 reqwest = {version = "0.12", features = ["json"]}
 reqwest-websocket = "0.4.4"
-rumqttc = "0.24.0"
 serde = {workspace = true}
 serde_json = {workspace = true}
 tokio = {workspace = true}

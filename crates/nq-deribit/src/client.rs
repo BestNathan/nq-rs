@@ -1,17 +1,17 @@
 use std::{cell::RefCell, sync::Arc};
 
 use anyhow::Result;
-use application::runner::Runner;
 use async_trait::async_trait;
 use flume::{Receiver, Sender};
 use futures_util::{SinkExt, StreamExt};
+use nq_app::runner::Runner;
 use reqwest::Proxy;
 use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::{deribit::message::WebsocketMessage, env};
+use crate::message::WebsocketMessage;
 
 use super::message::{self, MessageAssembler, SubscriptionMessage};
 
@@ -202,8 +202,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            url: env::deribit_ws_url(),
-            proxy: env::proxy().ok(),
+            url: nq_env::deribit::ws_url(),
+            proxy: Proxy::all(nq_env::proxy()).ok(),
             heartbeat_interval: 10,
         }
     }
@@ -255,13 +255,13 @@ impl Default for ClientBuilder {
 
 #[cfg(test)]
 mod tests {
-    use application::runner::Runner;
+    use nq_app::runner::Runner;
     use reqwest::Proxy;
     use tokio::select;
     use tokio_util::sync::CancellationToken;
     use tracing::debug;
 
-    use crate::deribit::client::Client;
+    use crate::client::Client;
 
     #[tokio::test]
     async fn test_ws_base_client() {
