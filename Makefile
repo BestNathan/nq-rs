@@ -14,11 +14,11 @@ fluvio-http-source-docker:
 fluvio-deribit-rv: fluvio-http-source-docker
 	@docker rm -f fluvio-deribit-rv-btc
 	@docker rm -f fluvio-deribit-rv-eth
-	@docker run --name fluvio-deribit-rv-btc \
+	@docker run -d --name fluvio-deribit-rv-btc \
 		--restart always \
 		-v ./fluvio/connectors/deribit-rv-btc-connector.yaml:/home/fluvio/connector/connector.yaml \
 		nq-rs/fluvio-http-source
-	@docker run --name fluvio-deribit-rv-eth \
+	@docker run -d --name fluvio-deribit-rv-eth \
 		--restart always \
 		-v ./fluvio/connectors/deribit-rv-eth-connector.yaml:/home/fluvio/connector/connector.yaml \
 		nq-rs/fluvio-http-source
