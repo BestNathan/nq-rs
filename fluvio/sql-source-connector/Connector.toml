@@ -1,0 +1,29 @@
+[package]
+apiVersion = "0.1.0"
+description = ""
+fluvio = "0.10.0"
+group = "nathan"
+license = "Apache-2.0"
+name = "sql-source"
+version = "0.1.0"
+visibility = "private"
+
+[direction]
+source = true
+
+[deployment]
+binary = "sql-source"
+
+[custom]
+name = "sql"
+required = ["url", "query"]
+
+[custom.properties.url]
+description = "Database Url"
+title = "Url"
+type = "string"
+
+[custom.properties.query]
+description = "Query SQL"
+title = "Sql"
+type = "string"

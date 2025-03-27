@@ -1,0 +1,13 @@
+[package]
+authors = ["Nathan <zhang.bestnathan@gmail.com>"]
+edition = "2021"
+name = "sql-source-connector"
+version = "0.1.0"
+
+[dependencies]
+fluvio = {workspace = true}
+fluvio-connector-common = {workspace = true, features = ["derive"]}
+futures-util = {workspace = true}
+serde = {workspace = true, features = ["derive"]}
+serde_json = {workspace = true}
+sqlx = {workspace = true, features = ["runtime-async-std", "postgres", "json"]}

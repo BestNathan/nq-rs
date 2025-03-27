@@ -2,6 +2,7 @@
 members = [
   "crates/*",
   "apps/*",
+  "fluvio/*",
 ]
 resolver = "2"
 
@@ -13,6 +14,10 @@ nq-deribit = {path = "./crates/nq-deribit"}
 nq-env = {path = "./crates/nq-env"}
 nq-mqtt = {path = "./crates/nq-mqtt"}
 
+# fluvio
+fluvio = {git = "https://github.com/infinyon/fluvio", tag = "v0.16.1"}
+fluvio-connector-common = {git = "https://github.com/infinyon/fluvio", tag = "v0.16.1", features = ["derive"]}
+
 # other
 anyhow = "1.0.97"
 async-trait = "0.1.88"
@@ -20,6 +25,7 @@ flume = "0.11.1"
 futures-util = "0.3.31"
 serde = {version = "1.0.219", features = ["derive"]}
 serde_json = "1.0.140"
+sqlx = "0.8"
 tokio = {version = "1.44.1", features = ["full"]}
 tokio-util = {version = "0.7.13", features = ["rt"]}
 tracing = "0.1.41"

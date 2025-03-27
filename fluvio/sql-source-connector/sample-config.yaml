@@ -1,0 +1,9 @@
+apiVersion: 0.1.0
+meta:
+  version: 0.1.0
+  name: sql-source-connector
+  type: sql-source
+  topic: test-sql-source-topic
+sql:
+  url: "postgres://127.0.0.1:5432/example"
+  query: select 1
