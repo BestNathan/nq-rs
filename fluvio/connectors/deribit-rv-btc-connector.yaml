@@ -6,7 +6,7 @@ meta:
   topic: deribit-tdengine-http-sink
 http:
   endpoint: https://www.deribit.com/api/v2/public/get_historical_volatility?currency=BTC
-  interval: 1m
+  interval: 10m
 
 transforms:
   - uses: nathan/deribit-rv-response-to-line@0.1.0
