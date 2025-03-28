@@ -25,18 +25,18 @@ fluvio-deribit-rv: fluvio-http-source-docker
 	@docker run -d --name fluvio-deribit-rv-btc \
 		--restart always \
 		-e HTTPS_PROXY=$(DERIBIT_PROXY) \
-		-v ./fluvio/connectors/deribit-rv-btc-connector.yaml:/home/fluvio/connector/connector.yaml \
+		-v ./fluvio/connectorconfs/deribit-rv-btc-connector.yaml:./connector.yaml \
 		nq-rs/fluvio-http-source
 	@docker run -d --name fluvio-deribit-rv-eth \
 		--restart always \
 		-e HTTPS_PROXY=$(DERIBIT_PROXY) \
-		-v ./fluvio/connectors/deribit-rv-eth-connector.yaml:/home/fluvio/connector/connector.yaml \
+		-v ./fluvio/connectorconfs/deribit-rv-eth-connector.yaml:./connector.yaml \
 		nq-rs/fluvio-http-source
 
 fluvio-deribit-tdengine-http-sink: fluvio-http-sink-docker
 	@docker rm -f fluvio-deribit-tdengine-http-sink
 	@docker run -d --name fluvio-deribit-tdengine-http-sink \
 		--restart always \
-		-v ./fluvio/connectors/deribit-tdengine-sink-connector.yaml:/home/fluvio/connector/connector.yaml \
-		-v $(HOME)/.nq/fluvio/secrets:/home/fluvio/connector/secrets \
+		-v ./fluvio/connectorconfs/deribit-tdengine-sink-connector.yaml:./connector.yaml \
+		-v $(HOME)/.nq/fluvio/secrets:./secrets \
 		nq-rs/fluvio-http-sink

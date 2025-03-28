@@ -2,9 +2,9 @@
 members = [
   "crates/*",
   "apps/*",
-  "fluvio/sql-source-connector",
+  "fluvio/connectors/*",
   "fluvio/sdf",
-  "fluvio/deribit-rv-response-to-line",
+  "fluvio/smartmodules/*",
 ]
 resolver = "2"
 
