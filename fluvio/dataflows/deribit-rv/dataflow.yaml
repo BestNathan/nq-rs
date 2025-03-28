@@ -9,7 +9,7 @@ config:
   consumer:
     default_starting_offset:
       value: 0
-      position: Beginning
+      position: End
 
 types:
   time-and-vol:
@@ -30,14 +30,18 @@ topics:
     schema:
       value:
         type: response
-  test-deribit-rv-response:
+  deribit-rv-eth:
+    schema:
+      value:
+        type: response
+  deribit-tdengine-http-sink:
     schema:
       value:
         type: string
         converter: raw
 
 services:
-  deribit-rv-response:
+  deribit-rv-btc:
     sources:
       - type: topic
         id: deribit-rv-btc
@@ -45,13 +49,13 @@ services:
     transforms:
       - operator: flat-map
         run: |
-          fn response_to_lines(resp: Response) -> Result<Vec<String>> {
+          fn response_to_lines_btc(resp: Response) -> Result<Vec<String>> {
             let mut strs: Vec<String> = vec![];
             for row in resp.result {
                 strs.push(format!(
-                    "{},{}",
+                    "deribit_rv,index_name=BTC rv={} {}000000",
+                    row.get(1).map(|f| f.to_string()).unwrap_or_default(),
                     row.get(0).map(|f| f.to_string()).unwrap_or_default(),
-                    row.get(1).map(|f| f.to_string()).unwrap_or_default()
                 ));
             }
             Ok(strs)
@@ -59,4 +63,28 @@ services:
 
     sinks:
       - type: topic
-        id: test-deribit-rv-response
+        id: deribit-tdengine-http-sink
+
+  deribit-rv-eth:
+    sources:
+      - type: topic
+        id: deribit-rv-eth
+
+    transforms:
+      - operator: flat-map
+        run: |
+          fn response_to_lines_eth(resp: Response) -> Result<Vec<String>> {
+            let mut strs: Vec<String> = vec![];
+            for row in resp.result {
+                strs.push(format!(
+                    "deribit_rv,index_name=ETH rv={} {}000000",
+                    row.get(1).map(|f| f.to_string()).unwrap_or_default(),
+                    row.get(0).map(|f| f.to_string()).unwrap_or_default(),
+                ));
+            }
+            Ok(strs)
+          }
+
+    sinks:
+      - type: topic
+        id: deribit-tdengine-http-sink

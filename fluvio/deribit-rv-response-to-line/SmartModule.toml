@@ -1,0 +1,12 @@
+[package]
+apiVersion = "0.1.0"
+description = ""
+group = "nathan"
+license = "Apache-2.0"
+name = "deribit-rv-response-to-line"
+version = "0.1.0"
+visibility = "private"
+
+[[params]]
+description = "index name"
+name = "index_name"

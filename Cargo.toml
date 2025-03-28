@@ -4,6 +4,7 @@ members = [
   "apps/*",
   "fluvio/sql-source-connector",
   "fluvio/sdf",
+  "fluvio/deribit-rv-response-to-line",
 ]
 resolver = "2"
 
@@ -31,3 +32,8 @@ tokio = {version = "1.44.1", features = ["full"]}
 tokio-util = {version = "0.7.13", features = ["rt"]}
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
+
+[profile.release-lto]
+inherits = "release"
+lto = true
+strip = "symbols"
