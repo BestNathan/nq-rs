@@ -1,9 +1,5 @@
 FROM alpine:latest AS fluvio
 
-ARG FLUVIO_HOST=127.0.0.1
-ARG FLUVIO_PORT=9103
-ARG FLUVIO_INSTALLATION_TYPE=docker
-
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
 RUN apk add --no-cache --update curl
 
@@ -18,6 +14,10 @@ WORKDIR /app
 RUN cdk hub download -o http-source.ipkg infinyon/http-source@0.4.3
 RUN tar -xf http-source.ipkg
 RUN tar -xzf manifest.tar.gz
+
+ARG FLUVIO_HOST=127.0.0.1
+ARG FLUVIO_PORT=9103
+ARG FLUVIO_INSTALLATION_TYPE=docker
 
 # Export fluvio profile
 RUN fluvio profile add fluvio $FLUVIO_HOST:$FLUVIO_PORT $FLUVIO_INSTALLATION_TYPE
