@@ -1,4 +1,6 @@
 /target
 /.hub
+/temp
 .DS_Store
 **/*.log
+**/.sdf

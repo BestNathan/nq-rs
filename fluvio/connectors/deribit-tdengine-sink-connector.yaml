@@ -1,0 +1,12 @@
+apiVersion: 0.1.0
+meta:
+  version: 0.0.1
+  name: deribit-tdengine-sink
+  type: http-sink
+  topic: deribit-tdengine-http-sink
+  secrets:
+    - name: TDENGINE_BASIC_AUTH
+http:
+  endpoint: "http://192.168.2.106:6041/influxdb/v1/write?db=deribit"
+  headers:
+    - "Authorization: Basic ${{ secrets.TDENGINE_BASIC_AUTH }}"

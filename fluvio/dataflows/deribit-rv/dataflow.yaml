@@ -1,0 +1,62 @@
+apiVersion: 0.5.0
+meta:
+  name: deribit-rv
+  version: 0.1.0
+  namespace: deribit
+
+config:
+  converter: json
+  consumer:
+    default_starting_offset:
+      value: 0
+      position: Beginning
+
+types:
+  time-and-vol:
+    type: list
+    items:
+      type: f64
+  response:
+    type: object
+    properties:
+      result:
+        type: list
+        type-name: tv-list
+        items:
+          type: time-and-vol
+
+topics:
+  deribit-rv-btc:
+    schema:
+      value:
+        type: response
+  test-deribit-rv-response:
+    schema:
+      value:
+        type: string
+        converter: raw
+
+services:
+  deribit-rv-response:
+    sources:
+      - type: topic
+        id: deribit-rv-btc
+
+    transforms:
+      - operator: flat-map
+        run: |
+          fn response_to_lines(resp: Response) -> Result<Vec<String>> {
+            let mut strs: Vec<String> = vec![];
+            for row in resp.result {
+                strs.push(format!(
+                    "{},{}",
+                    row.get(0).map(|f| f.to_string()).unwrap_or_default(),
+                    row.get(1).map(|f| f.to_string()).unwrap_or_default()
+                ));
+            }
+            Ok(strs)
+          }
+
+    sinks:
+      - type: topic
+        id: test-deribit-rv-response

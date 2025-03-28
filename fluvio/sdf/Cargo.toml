@@ -1,0 +1,7 @@
+[package]
+edition = "2024"
+name = "sdf"
+version = "0.1.0"
+
+[dependencies]
+anyhow = {workspace = true}
