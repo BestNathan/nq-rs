@@ -10,11 +10,6 @@ RUN export PATH
 
 WORKDIR /app
 
-# Download specific connector (change to your connector)
-RUN cdk hub download -o http-source.ipkg infinyon/http-source@0.4.3
-RUN tar -xf http-source.ipkg
-RUN tar -xzf manifest.tar.gz
-
 ARG FLUVIO_HOST=127.0.0.1
 ARG FLUVIO_PORT=9103
 ARG FLUVIO_INSTALLATION_TYPE=docker
@@ -23,8 +18,19 @@ ARG FLUVIO_INSTALLATION_TYPE=docker
 RUN fluvio profile add fluvio $FLUVIO_HOST:$FLUVIO_PORT $FLUVIO_INSTALLATION_TYPE
 RUN fluvio profile export > fluvio_profile.toml
 
+FROM fluvio AS fluvio-connector
+
+WORKDIR /app
+
+ARG FLUVIO_HTTP_SOURCE_CONNECTOR_VERSION=0.4.3
+
+# Download specific connector
+RUN cdk hub download -o http-source.ipkg infinyon/http-source@$FLUVIO_HTTP_SOURCE_CONNECTOR_VERSION
+RUN tar -xf http-source.ipkg
+RUN tar -xzf manifest.tar.gz
+
 # setup runtime container
-FROM alpine:latest
+FROM alpine:latest AS runtime
 
 ENV RUST_LOG=info
 
@@ -34,7 +40,7 @@ USER fluvio
 WORKDIR /home/fluvio/connector
 
 # Copy connector configuration
-COPY --from=fluvio /app/http-source /home/fluvio/connector/http-source
+COPY --from=fluvio-connector /app/http-source /home/fluvio/connector/http-source
 COPY --from=fluvio /app/fluvio_profile.toml /home/fluvio/.fluvio/config
 
 # run http-source, this will be different for each connector
