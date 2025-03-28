@@ -38,5 +38,5 @@ fluvio-deribit-tdengine-http-sink: fluvio-http-sink-docker
 	@docker run -d --name fluvio-deribit-tdengine-http-sink \
 		--restart always \
 		-v ./fluvio/connectors/deribit-tdengine-sink-connector.yaml:/home/fluvio/connector/connector.yaml \
-		-v $HOME/.nq/fluvio/secrets:/home/fluvio/connector/secrets \
+		-v ($HOME)/.nq/fluvio/secrets:/home/fluvio/connector/secrets \
 		nq-rs/fluvio-http-sink
