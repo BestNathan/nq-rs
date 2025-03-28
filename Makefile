@@ -6,6 +6,9 @@ deribit-subscription:
 	@docker run -d --name deribit-subscription --restart always nq-rs/deribit-subscription
 
 FLUVIO_HOST=none
+FLUVIO_CONNECTOR_WORKDIR=/home/fluvio/connector
+FLUVIO_CONNECTOR_CONFIG=$(FLUVIO_CONNECTOR_WORKDIR)/connector.yaml
+FLUVIO_CONNECTOR_SECRET=$(FLUVIO_CONNECTOR_WORKDIR)/secrets
 
 fluvio-http-source-docker:
 	@if [ "$(FLUVIO_HOST)" = "none" ]; then echo "\nmissing fluvio host, please use 'FLUVIO_HOST=xxx'\n\n" && exit 1; fi
@@ -25,18 +28,18 @@ fluvio-deribit-rv: fluvio-http-source-docker
 	@docker run -d --name fluvio-deribit-rv-btc \
 		--restart always \
 		-e HTTPS_PROXY=$(DERIBIT_PROXY) \
-		-v ./fluvio/connectorconfs/deribit-rv-btc-connector.yaml:./connector.yaml \
+		-v ./fluvio/connectorconfs/deribit-rv-btc-connector.yaml:$(FLUVIO_CONNECTOR_CONFIG) \
 		nq-rs/fluvio-http-source
 	@docker run -d --name fluvio-deribit-rv-eth \
 		--restart always \
 		-e HTTPS_PROXY=$(DERIBIT_PROXY) \
-		-v ./fluvio/connectorconfs/deribit-rv-eth-connector.yaml:./connector.yaml \
+		-v ./fluvio/connectorconfs/deribit-rv-eth-connector.yaml:$(FLUVIO_CONNECTOR_CONFIG) \
 		nq-rs/fluvio-http-source
 
 fluvio-deribit-tdengine-http-sink: fluvio-http-sink-docker
 	@docker rm -f fluvio-deribit-tdengine-http-sink
 	@docker run -d --name fluvio-deribit-tdengine-http-sink \
 		--restart always \
-		-v ./fluvio/connectorconfs/deribit-tdengine-sink-connector.yaml:./connector.yaml \
-		-v $(HOME)/.nq/fluvio/secrets:./secrets \
+		-v ./fluvio/connectorconfs/deribit-tdengine-sink-connector.yaml:$(FLUVIO_CONNECTOR_CONFIG) \
+		-v $(HOME)/.nq/fluvio/secrets:$(FLUVIO_CONNECTOR_SECRET) \
 		nq-rs/fluvio-http-sink
