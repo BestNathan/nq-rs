@@ -1,6 +1,8 @@
 FROM alpine:latest AS fluvio
 
 ARG FLUVIO_HOST=127.0.0.1
+ARG FLUVIO_PORT=9103
+ARG FLUVIO_INSTALLATION_TYPE=docker
 
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
 RUN apk add --no-cache --update curl
@@ -18,7 +20,7 @@ RUN tar -xf http-source.ipkg
 RUN tar -xzf manifest.tar.gz
 
 # Export fluvio profile
-RUN fluvio profile add fluvio $FLUVIO_HOST:9103 docker
+RUN fluvio profile add fluvio $FLUVIO_HOST:$FLUVIO_PORT $FLUVIO_INSTALLATION_TYPE
 RUN fluvio profile export > fluvio_profile.toml
 
 # setup runtime container
