@@ -26,8 +26,9 @@ WORKDIR /app
 # stage for chef planner
 ################
 FROM chef AS planner
+ARG APP
 COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+RUN cargo chef prepare --recipe-path recipe.json --bin $APP
 
 ################
 # stage for builder
