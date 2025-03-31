@@ -34,9 +34,11 @@ RUN cargo chef prepare --recipe-path recipe.json
 ################
 FROM chef AS builder
 ARG APP
+ARG PROXY
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 COPY --from=planner /app/recipe.json recipe.json
 # Notice that we are specifying the --target flag!
-RUN cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
+RUN HTTPS_PROXY=$PROXY cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --target x86_64-unknown-linux-musl --bin $APP
 
