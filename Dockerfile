@@ -53,6 +53,7 @@ ARG APP
 ARG PROXY
 ENV APP=$APP
 ENV PROXY=$PROXY
+ENV RUST_LOG=info
 RUN addgroup -S nqrs && adduser -S nqrs -G nqrs
 COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/$APP /usr/local/bin/
 USER nqrs
