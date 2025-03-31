@@ -1,6 +1,6 @@
 use std::{cell::RefCell, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use flume::{Receiver, Sender};
 use futures_util::{SinkExt, StreamExt};
@@ -70,7 +70,7 @@ impl Runner for Client {
         info!("deribit client is connecting websocket");
 
         let mut ws = select! {
-            ws = self.connect() => ws?,
+            ws = self.connect() => ws.with_context(|| "")?,
             _ = canceltoken.cancelled() => return Ok(())
         };
 
@@ -83,21 +83,24 @@ impl Runner for Client {
                     break;
                 },
                 Ok(msg_to_send) = self.message_rx.recv_async() => {
-                    let _ = ws.send(msg_to_send).await;
+                    ws.send(msg_to_send).await.with_context(|| "deribit client send message")?;
                 },
                 next = ws.next() => {
                     let message = match next {
                         Some(m) => {m}
                         None => {
-                            debug!("deribit client not have next message");
-                            break;
+                            return Err(anyhow!("deribit client do not have next message"))
                         },
-                    }?;
+                    }.with_context(||"deribit client next message")?;
 
                     let text = match message {
                         Message::Text(text) => {text}
+                        Message::Binary(bs) => {String::from_utf8(bs)?}
+                        Message::Close { code, reason } => {
+                            return Err(anyhow!("deribit client closed with code={}, reason={}", code, reason))
+                        }
                         _ => {
-                            debug!("deribit client recv non text message: {:?}", message);
+                            warn!("deribit client recv non text message: {:?}", message);
                             continue;
                         }
                     };

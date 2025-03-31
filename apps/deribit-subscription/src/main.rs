@@ -7,7 +7,7 @@ use nq_deribit::message::SubscriptionParams;
 use rumqttc::{AsyncClient, QoS};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{info, trace, warn};
 
 const SUBSCRIPTION: &str = include_str!("../resources/subscription.txt");
 const DERIBIT_SUBSCRIPTION_TOPIC: &str = "t/deribit/subscription";
@@ -55,7 +55,7 @@ impl Runner for App {
                     match msg {
                         Some(ref smsg) => {
                             if let SubscriptionParams::Subscribe(p) = &smsg.params {
-                                debug!("recv subscription message from channel: {:}", p.channel);
+                                trace!("recv subscription message from channel: {:}", p.channel);
 
                                 let payload = serde_json::to_string(&smsg).unwrap();
 
