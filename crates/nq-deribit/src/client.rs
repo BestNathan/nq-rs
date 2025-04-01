@@ -1,4 +1,4 @@
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
@@ -7,7 +7,7 @@ use futures_util::{SinkExt, StreamExt};
 use nq_app::runner::Runner;
 use reqwest::Proxy;
 use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
-use tokio::select;
+use tokio::{select, time::interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -76,11 +76,16 @@ impl Runner for Client {
 
         info!("deribit client is running");
 
+        let mut timer = interval(Duration::from_secs(10));
+
         loop {
             select! {
                 () = canceltoken.cancelled() => {
                     debug!("deribit client recv cancelling");
                     break;
+                },
+                _ = timer.tick() => {
+                    ws.send(Message::Ping(vec![])).await.with_context(||"deribit client send ping")?;
                 },
                 Ok(msg_to_send) = self.message_rx.recv_async() => {
                     ws.send(msg_to_send).await.with_context(|| "deribit client send message")?;
