@@ -20,21 +20,18 @@ fluvio-http-sink-docker:
 
 
 DERIBIT_PROXY=none
-
+DERIBIT_CURRENCIES := btc eth sol
 fluvio-deribit-rv: fluvio-http-source-docker
 	@if [ "$(DERIBIT_PROXY)" = "none" ]; then echo "\nmissing deribit proxy, please use 'DERIBIT_PROXY=xxx'\n\n" && exit 1; fi
-	@docker rm -f fluvio-deribit-rv-btc
-	@docker rm -f fluvio-deribit-rv-eth
-	@docker run -d --name fluvio-deribit-rv-btc \
-		--restart always \
-		-e HTTPS_PROXY=$(DERIBIT_PROXY) \
-		-v ./fluvio/connectorconfs/deribit-rv-btc-connector.yaml:$(FLUVIO_CONNECTOR_CONFIG) \
-		nq-rs/fluvio-http-source
-	@docker run -d --name fluvio-deribit-rv-eth \
-		--restart always \
-		-e HTTPS_PROXY=$(DERIBIT_PROXY) \
-		-v ./fluvio/connectorconfs/deribit-rv-eth-connector.yaml:$(FLUVIO_CONNECTOR_CONFIG) \
-		nq-rs/fluvio-http-source
+	@for currency in $(DERIBIT_CURRENCIES); do \
+		echo run fluvio-deribit-rv for $$currency; \
+		docker rm -f fluvio-deribit-rv-$$currency; \
+		docker run -d --name fluvio-deribit-rv-$$currency \
+			--restart always \
+			-e HTTPS_PROXY=$(DERIBIT_PROXY) \
+			-v ./fluvio/connectorconfs/deribit-rv-$$currency-connector.yaml:$(FLUVIO_CONNECTOR_CONFIG) \
+			nq-rs/fluvio-http-source; \
+	done
 
 fluvio-deribit-tdengine-http-sink: fluvio-http-sink-docker
 	@docker rm -f fluvio-deribit-tdengine-http-sink
