@@ -20,7 +20,7 @@ fluvio-http-sink-docker:
 
 
 DERIBIT_PROXY=none
-DERIBIT_CURRENCIES := btc eth sol
+DERIBIT_CURRENCIES := btc eth sol paxg
 fluvio-deribit-rv: fluvio-http-source-docker
 	@if [ "$(DERIBIT_PROXY)" = "none" ]; then echo "\nmissing deribit proxy, please use 'DERIBIT_PROXY=xxx'\n\n" && exit 1; fi
 	@for currency in $(DERIBIT_CURRENCIES); do \

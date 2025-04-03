@@ -1,0 +1,14 @@
+apiVersion: 0.1.0
+meta:
+  version: 0.3.8
+  name: deribit-rv-eth
+  type: http-source
+  topic: deribit-tdengine-http-sink
+http:
+  endpoint: https://www.deribit.com/api/v2/public/get_historical_volatility?currency=PAXG
+  interval: 10m
+
+transforms:
+  - uses: nathan/deribit-rv-response-to-line@0.1.0
+    with:
+      index_name: PAXG
