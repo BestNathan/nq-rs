@@ -1,220 +1,331 @@
-use std::{cell::RefCell, sync::Arc, time::Duration};
-
-use anyhow::{Context, Result, anyhow};
+use crate::request::authentication::AuthRequest;
+use crate::request::session_management::SetHeartbeatRequest;
+use crate::request::subscribe::{PrivateSubscribeRequest, PublicSubscribeRequest};
+use crate::request::support::TestRequest;
+use crate::{api::DeribitApiClient, sub::DeribitSubscriptionClient};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
+use derive_builder::Builder;
 use flume::{Receiver, Sender};
 use futures_util::{SinkExt, StreamExt};
 use nq_app::runner::Runner;
 use reqwest::Proxy;
 use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
-use tokio::{select, time::interval};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::RwLock;
+use std::{cell::RefCell, sync::Arc, time::Duration};
+use tokio::{select, sync::oneshot};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
-
-use crate::message::WebsocketMessage;
-
-use super::message::{self, MessageAssembler, SubscriptionMessage};
+use tracing::{debug, info, trace, warn};
 
 pub struct Client {
-    canceltoken: CancellationToken,
     config: Arc<Config>,
-    inner_client: reqwest::Client,
-    ma: Arc<message::MessageAssembler>,
-    subscription_tx: Sender<message::SubscriptionMessage>,
-    subscription_rx: Receiver<message::SubscriptionMessage>,
-    message_tx: Sender<Message>,
-    message_rx: Receiver<Message>,
+    token: Arc<RwLock<Option<String>>>,
+    subscription_tx: Sender<String>,
+    subscription_rx: Receiver<String>,
+    message_tx: Sender<String>,
+    message_rx: Receiver<String>,
+    responser_tx: Sender<(i64, oneshot::Sender<String>)>,
+    responser_rx: Receiver<(i64, oneshot::Sender<String>)>,
 }
-
 impl Client {
     pub fn builder() -> ClientBuilder {
         ClientBuilder {
-            config: Config::default().into(),
+            config: ConfigBuilder::default().build().unwrap().into(),
         }
     }
 
-    async fn connect(&self) -> Result<WebSocket> {
-        let res = self
-            .inner_client
+    fn build_http_client(&self) -> Result<reqwest::Client> {
+        let client = match self.config.proxy {
+            Some(ref proxy) => reqwest::Client::builder().proxy(proxy.clone()).build()?,
+            _ => reqwest::Client::builder().build()?,
+        };
+
+        Ok(client)
+    }
+
+    async fn connect_websocket(&self) -> Result<WebSocket> {
+        let client = self
+            .build_http_client()
+            .with_context(|| "deribit client build http client")?;
+
+        let res = client
             .get(self.config.url.clone())
             .upgrade()
             .send()
-            .await?;
+            .await
+            .with_context(|| "deribit client http send upgrade")?
+            .into_websocket()
+            .await
+            .with_context(|| "deribit client websocket upgrade")?;
 
-        let mut ws = res.into_websocket().await?;
-
-        ws.send(Message::Text(
-            self.ma
-                .set_heartbeat_message(self.config.heartbeat_interval),
-        ))
-        .await?;
-
-        Ok(ws)
+        Ok(res)
     }
 
-    pub fn split(&self) -> (MessageWriter, MessageSubscriber) {
-        (
-            MessageWriter::new(
-                self.canceltoken.clone(),
-                self.message_tx.clone(),
-                self.ma.clone(),
-            ),
-            MessageSubscriber::new(self.canceltoken.clone(), self.subscription_rx.clone()),
+    pub fn subscription_client(&self) -> DeribitSubscriptionClient {
+        DeribitSubscriptionClient::new(self.subscription_rx.clone())
+    }
+
+    pub fn api_client(&self) -> DeribitApiClient {
+        DeribitApiClient::new(
+            self.token.clone(),
+            self.message_tx.clone(),
+            self.responser_tx.clone(),
+            Duration::from_secs(self.config.request_timeout),
         )
+    }
+
+    fn auth_req(&self) -> Option<AuthRequest> {
+        if self.config.client_id.is_some() && self.config.client_secret.is_some() {
+            Some(AuthRequest::credential_auth(
+                self.config.client_id.as_ref()?,
+                self.config.client_secret.as_ref()?,
+            ))
+        } else {
+            None
+        }
+    }
+
+    fn public_sub_req(&self) -> Option<PublicSubscribeRequest> {
+        if self.config.public_subscribe_channels.is_empty() {
+            None
+        } else {
+            Some(PublicSubscribeRequest::new(
+                self.config.public_subscribe_channels.clone(),
+            ))
+        }
+    }
+
+    fn private_sub_req(&self) -> Option<PrivateSubscribeRequest> {
+        if self.config.private_subscribe_channels.is_empty() {
+            None
+        } else {
+            Some(PrivateSubscribeRequest::new(
+                self.config.private_subscribe_channels.clone(),
+            ))
+        }
+    }
+
+    pub async fn eventloop_with_cancel(&self, ct: CancellationToken) -> Result<()> {
+        debug!("deribit client eventloop begin");
+
+        loop {
+            if ct.is_cancelled() {
+                return Ok(());
+            }
+
+            debug!("deribit client begin to connect websocket");
+            let mut ws = select! {
+                ws = self.connect_websocket() => ws.with_context(|| "deribit client connect websocket")?,
+                _ = ct.cancelled() => return Ok(())
+            };
+            debug!("deribit client websocket connected");
+
+            let (err_tx, err_rx) = flume::bounded(1);
+            let mut responser_map: HashMap<i64, oneshot::Sender<String>> = HashMap::new();
+            let mut message_map: HashMap<i64, String> = HashMap::new();
+
+            // setup
+            {
+                let err_tx = err_tx.clone();
+                let apiclient = self.api_client();
+                let set_heartbeat_req =
+                    SetHeartbeatRequest::with_interval(self.config.heartbeat_interval);
+                let public_sub_req = self.public_sub_req();
+                let private_sub_req = self.private_sub_req();
+                let auth_req = self.auth_req();
+                let token = self.token.clone();
+                tokio::spawn(async move {
+                    let res = async {
+                        apiclient
+                            .call(set_heartbeat_req)
+                            .await
+                            .with_context(|| "deribit client set heartbeat")?;
+
+                        if let Some(req) = auth_req {
+                            let res = apiclient
+                                .call(req)
+                                .await
+                                .with_context(|| "deribit client auth")?;
+
+                            // this token expires_in 31536000(365 days)
+                            // currently do not need to handle refresh logic
+                            *token.write().unwrap() = res.access_token;
+                        }
+
+                        if let Some(req) = public_sub_req {
+                            apiclient
+                                .call(req)
+                                .await
+                                .with_context(|| "deribit client public subscribe")?;
+                        }
+
+                        if let Some(req) = private_sub_req {
+                            apiclient
+                                .call(req)
+                                .await
+                                .with_context(|| "deribit client private subscribe")?;
+                        }
+
+                        Ok::<(), anyhow::Error>(())
+                    }
+                        .await;
+
+                    if let Err(e) = res {
+                        err_tx.send_async(e).await.unwrap();
+                    }
+                });
+            }
+
+            loop {
+                select! {
+                    // handle error
+                    err = err_rx.recv_async() => {
+                        trace!("deribit client recv error: {:?}", err);
+                        let err = err.with_context(|| "deribit client recv err")?;
+                        return Err(err);
+                    },
+                    // handle cancel
+                    () = ct.cancelled() => {
+                        trace!("deribit client recv cancelling");
+                        return Ok(());
+                    },
+                    // handle message sending
+                    msg = self.message_rx.recv_async() => {
+                        trace!("deribit client recv tx message");
+                        let msg = msg.with_context(|| "deribit client recv message")?;
+                        ws.send(Message::Text(msg)).await.with_context(|| "deribit client send message")?;
+                    },
+                    // handle request responser
+                    Ok((id, responser)) = self.responser_rx.recv_async() => {
+                        trace!("deribit client recv responser");
+                        if let Some(text) = message_map.remove(&id) {
+                            if let Err(_) = responser.send(text) {
+                                warn!("deribit client missing message responser for id={}", id);
+                            }
+                        } else {
+                            responser_map.insert(id, responser);
+                        }
+                    }
+                    // handle websocket message
+                    next = ws.next() => {
+                        trace!("deribit client recv next");
+                        let message = match next {
+                            Some(Err(e)) => {
+                                warn!("deribit client websocket next message error: {}", e);
+                                break;
+                            }
+                            Some(Ok(m)) => {m}
+                            None => {
+                                debug!("deribit client websocket no more messages");
+                                break;
+                            },
+                        };
+
+                        trace!("deribit client websocket recv message: {:?}", message);
+
+                        let text = match message {
+                            Message::Text(text) => {text}
+                            // should never have happened
+                            Message::Binary(bs) => {String::from_utf8(bs)?}
+                            Message::Close { code, reason } => {
+                                debug!("deribit client websocket recv close(code={}, reason={}) message", code, reason);
+                                break;
+                            }
+                            Message::Pong(_) => {
+                                debug!("deribit client websocket recv pong");
+                                continue;
+                            }
+                            _ => {
+                                debug!("deribit client websocket recv unhandled message: {:?}", message);
+                                continue;
+                            }
+                        };
+
+                        let value: Value = serde_json::from_str(&text).with_context(|| "deribit client websocket decode to value")?;
+
+                        // handle api message
+                        if let Some(id) = value.get("id") {
+                            let id = match id.as_i64() {
+                                Some(id) => {id}
+                                None => {
+                                    warn!("deribit client websocket recv api message with invalid id={:?}", id);
+                                    continue;
+                                }
+                            };
+
+                            let responser = match responser_map.remove(&id) {
+                                Some(r) => {r}
+                                None => {
+                                    message_map.insert(id, text);
+                                    continue;
+                                }
+                            };
+
+                            if let Err(_) = responser.send(text) {
+                                warn!("deribit client missing message responser for id={}", id);
+                            }
+                            continue;
+                        }
+
+                        // handle subscription message
+                        if let Some(method) = value.get("method").and_then(Value::as_str) {
+                            match method {
+                                "heartbeat" => {
+                                    {
+                                        let apiclient = self.api_client();
+                                        tokio::spawn(async move {
+                                            apiclient.call(TestRequest::default()).await?;
+                                            Ok::<(), anyhow::Error>(())
+                                        });
+                                    }
+                                }
+                                "subscription" => {
+                                    if let Err(_) = self.subscription_tx.send_async(text).await {
+                                        warn!("deribit client send subscription message fail");
+                                    }
+                                }
+                                _ => {
+                                    warn!("deribit client recv unknown method: {}", method);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 #[async_trait]
 impl Runner for Client {
     async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
-        info!("deribit client is connecting websocket");
-
-        let mut ws = select! {
-            ws = self.connect() => ws.with_context(|| "")?,
-            _ = canceltoken.cancelled() => return Ok(())
-        };
-
-        info!("deribit client is running");
-
-        let mut timer = interval(Duration::from_secs(10));
-
-        loop {
-            select! {
-                () = canceltoken.cancelled() => {
-                    debug!("deribit client recv cancelling");
-                    break;
-                },
-                _ = timer.tick() => {
-                    ws.send(Message::Ping(vec![])).await.with_context(||"deribit client send ping")?;
-                },
-                Ok(msg_to_send) = self.message_rx.recv_async() => {
-                    ws.send(msg_to_send).await.with_context(|| "deribit client send message")?;
-                },
-                next = ws.next() => {
-                    let message = match next {
-                        Some(m) => {m}
-                        None => {
-                            return Err(anyhow!("deribit client do not have next message"))
-                        },
-                    }.with_context(||"deribit client next message")?;
-
-                    let text = match message {
-                        Message::Text(text) => {text}
-                        Message::Binary(bs) => {String::from_utf8(bs)?}
-                        Message::Close { code, reason } => {
-                            return Err(anyhow!("deribit client closed with code={}, reason={}", code, reason))
-                        }
-                        _ => {
-                            warn!("deribit client recv non text message: {:?}", message);
-                            continue;
-                        }
-                    };
-
-                    match serde_json::from_str::<WebsocketMessage>(&text) {
-                        Ok(json) => match json {
-                            WebsocketMessage::SubscriptionMessage(submsg) => {
-                                if submsg.method == "heartbeat" {
-                                    let _ = self.message_tx.send_async(Message::Text(self.ma.test_message())).await;
-                                } else {
-                                    let _ = self.subscription_tx.send_async(submsg).await;
-                                }
-                            }
-                            WebsocketMessage::ResultMessage(result) => {
-                                debug!("deribit client recv result message: {:?}", result)
-                            }
-                            WebsocketMessage::Other(val) => {
-                                debug!("deribit client recv other message: {:?}", val.to_string())
-                            }
-                        },
-                        Err(error) => {
-                            warn!(?error, "deribit client parse websocket message fail");
-                            return Err(error.into())
-                        }
-                    };
-
-                }
-            }
-        }
-
-        // clear
-        if !self.canceltoken.is_cancelled() {
-            self.canceltoken.cancel();
-        }
-
-        info!("deribit client done");
-
+        info!("deribit client is running...");
+        self.eventloop_with_cancel(canceltoken).await?;
+        info!("deribit client done.");
         Ok(())
     }
 }
 
-pub struct MessageWriter {
-    canceltoken: CancellationToken,
-    tx: Sender<Message>,
-    ma: Arc<MessageAssembler>,
-}
-
-impl MessageWriter {
-    fn new(canceltoken: CancellationToken, tx: Sender<Message>, ma: Arc<MessageAssembler>) -> Self {
-        Self {
-            canceltoken,
-            tx,
-            ma,
-        }
-    }
-
-    async fn send(&self, msg: String) -> Result<()> {
-        select! {
-            res = self.tx.send_async(Message::Text(msg)) =>  Ok(res?),
-            _ = self.canceltoken.cancelled() => Ok(())
-        }
-    }
-
-    pub async fn subscribe(&self, channels: Vec<String>) -> Result<()> {
-        self.send(self.ma.subscribe_message(channels)).await?;
-        Ok(())
-    }
-}
-
-pub struct MessageSubscriber {
-    canceltoken: CancellationToken,
-    rx: Receiver<SubscriptionMessage>,
-}
-
-impl MessageSubscriber {
-    fn new(canceltoken: CancellationToken, rx: Receiver<SubscriptionMessage>) -> Self {
-        Self { canceltoken, rx }
-    }
-
-    pub async fn recv(&self) -> Option<SubscriptionMessage> {
-        select! {
-            _ = self.canceltoken.cancelled() => None,
-            msg = self.rx.recv_async() => {
-                match msg {
-                    Ok(msg) => Some(msg),
-                    Err(e) => {
-                        warn!(error = ?e, "deribit client subscription recv fail");
-                        None
-                    }
-                }
-            },
-        }
-    }
-}
-
+#[derive(Builder)]
 pub struct Config {
-    url: String,
-    proxy: Option<Proxy>,
-    heartbeat_interval: i64,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            url: nq_env::deribit::ws_url(),
-            proxy: Proxy::all(nq_env::proxy()).ok(),
-            heartbeat_interval: 10,
-        }
-    }
+    #[builder(default = "nq_env::deribit::ws_url()")]
+    pub url: String,
+    #[builder(setter(into, strip_option), default)]
+    pub proxy: Option<Proxy>,
+    #[builder(default = "30")]
+    pub heartbeat_interval: u64,
+    #[builder(default = "60")]
+    pub request_timeout: u64,
+    #[builder(default = "Vec::new()")]
+    pub public_subscribe_channels: Vec<String>,
+    #[builder(default = "Vec::new()")]
+    pub private_subscribe_channels: Vec<String>,
+    #[builder(default)]
+    pub client_id: Option<String>,
+    #[builder(default)]
+    pub client_secret: Option<String>,
 }
 
 pub struct ClientBuilder {
@@ -223,41 +334,25 @@ pub struct ClientBuilder {
 
 impl ClientBuilder {
     pub fn build(self) -> Result<Client> {
-        let client = match self.config.borrow().proxy {
-            Some(ref proxy) => reqwest::Client::builder().proxy(proxy.clone()).build()?,
-            _ => reqwest::Client::builder().build()?,
-        };
-
-        let (subscription_tx, subscription_rx) = flume::unbounded::<message::SubscriptionMessage>();
-        let (message_tx, message_rx) = flume::unbounded::<Message>();
+        let (subscription_tx, subscription_rx) = flume::unbounded::<String>();
+        let (message_tx, message_rx) = flume::unbounded::<String>();
+        let (responser_tx, responser_rx) = flume::unbounded::<(i64, oneshot::Sender<String>)>();
 
         Ok(Client {
-            canceltoken: CancellationToken::new(),
-            config: Arc::from(self.config.into_inner()),
-            inner_client: client,
-            ma: MessageAssembler::new().into(),
+            config: Arc::new(self.config.into_inner()),
+            token: Arc::new(RwLock::new(None)),
             subscription_rx,
             subscription_tx,
             message_tx,
             message_rx,
+            responser_tx,
+            responser_rx,
         })
     }
 
-    pub fn set_proxy(self, proxy: Proxy) -> Self {
-        self.config.borrow_mut().proxy = Some(proxy);
+    pub fn config(self, config: Config) -> Self {
+        *self.config.borrow_mut() = config;
         self
-    }
-
-    pub fn proxy(&self) -> Option<Proxy> {
-        self.config.borrow().proxy.clone()
-    }
-}
-
-impl Default for ClientBuilder {
-    fn default() -> Self {
-        Self {
-            config: RefCell::new(Config::default()),
-        }
     }
 }
 
@@ -267,23 +362,23 @@ mod tests {
     use reqwest::Proxy;
     use tokio::select;
     use tokio_util::sync::CancellationToken;
-    use tracing::debug;
+    use tracing::{debug, error};
 
     use crate::client::Client;
+    use crate::client::ConfigBuilder;
 
     #[tokio::test]
-    async fn test_ws_base_client() {
-        unsafe {
-            std::env::set_var("RUST_LOG", "debug");
-        }
+    async fn test_ws_base_client() -> anyhow::Result<()> {
         tracing_subscriber::fmt::try_init().unwrap_or_default();
 
-        let client = Client::builder()
-            .set_proxy(Proxy::all("http://192.168.2.98:8890").unwrap())
-            .build()
-            .unwrap();
+        let config = ConfigBuilder::default()
+            .proxy(Proxy::all("http://192.168.2.98:8890")?)
+            .public_subscribe_channels(vec!["markprice.options.btc_usd".into()])
+            .build()?;
 
-        let (writer, subscriber) = client.split();
+        let client = Client::builder().config(config).build()?;
+
+        let subscriber = client.subscription_client();
 
         let tt = tokio_util::task::TaskTracker::new();
         let canceltoken = CancellationToken::new();
@@ -291,37 +386,38 @@ mod tests {
         {
             let token = canceltoken.clone();
             tt.spawn(async move {
-                writer
-                    .subscribe(vec!["markprice.options.btc_usd".into()])
-                    .await
-                    .unwrap();
-
                 loop {
                     select! {
                         () = token.cancelled() => {
                             break;
                         },
                         msg = subscriber.recv() => {
-                            match msg {
-                                Some(smsg) => {
-                                    debug!(method = smsg.method, "recv subscription message")
+                            match msg.ok() {
+                                Some(data) => {
+                                    debug!("recv subscription data: {:?}", data);
                                 },
                                 None => break,
                             }
                         }
                     }
                 }
+
+                debug!("subscriber done");
             });
         }
 
         {
             let token = canceltoken.clone();
             tt.spawn(async move {
-                client.run(token).await.unwrap();
+                client
+                    .run(token)
+                    .await
+                    .map_err(|e| error!("client run error: {:?}", e))
             });
         }
 
         tt.close();
         tt.wait().await;
+        Ok(())
     }
 }

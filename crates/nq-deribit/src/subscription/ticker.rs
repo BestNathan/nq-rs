@@ -1,0 +1,110 @@
+use serde::{Deserialize, Serialize};
+
+use crate::gen_channel;
+
+use crate::model::interval::Interval;
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum State {
+    Open,
+    Close,
+}
+
+/// Attention: if this is used along with Tickers,
+/// please put this after Tickers otherwise all Tickers
+/// will be deserialize to Quotes since the Quotes is a subset of Tickers
+/// data: object
+//   ›  ask_iv	number	(Only for option) implied volatility for best ask
+//   ›  best_ask_amount	number	It represents the requested order size of all best asks
+//   ›  best_ask_price	number	The current best ask price, null if there aren't any asks
+//   ›  best_bid_amount	number	It represents the requested order size of all best bids
+//   ›  best_bid_price	number	The current best bid price, null if there aren't any bids
+//   ›  bid_iv	number	(Only for option) implied volatility for best bid
+//   ›  current_funding	number	Current funding (perpetual only)
+//   ›  delivery_price	number	The settlement price for the instrument. Only when state = closed
+//   ›  estimated_delivery_price	number	Estimated delivery price for the market. For more details, see Contract Specification > General Documentation > Expiration Price
+//   ›  funding_8h	number	Funding 8h (perpetual only)
+//   ›  greeks	object	Only for options
+//   ›    ›  delta	number	(Only for option) The delta value for the option
+//   ›    ›  gamma	number	(Only for option) The gamma value for the option
+//   ›    ›  rho	number	(Only for option) The rho value for the option
+//   ›    ›  theta	number	(Only for option) The theta value for the option
+//   ›    ›  vega	number	(Only for option) The vega value for the option
+//   ›  index_price	number	Current index price
+//   ›  instrument_name	string	Unique instrument identifier
+//   ›  interest_rate	number	Interest rate used in implied volatility calculations (options only)
+//   ›  interest_value	number	Value used to calculate realized_funding in positions (perpetual only)
+//   ›  last_price	number	The price for the last trade
+//   ›  mark_iv	number	(Only for option) implied volatility for mark price
+//   ›  mark_price	number	The mark price for the instrument
+//   ›  max_price	number	The maximum price for the future. Any buy orders you submit higher than this price, will be clamped to this maximum.
+//   ›  min_price	number	The minimum price for the future. Any sell orders you submit lower than this price will be clamped to this minimum.
+//   ›  open_interest	number	The total amount of outstanding contracts in the corresponding amount units. For perpetual and inverse futures the amount is in USD units. For options and linear futures and it is the underlying base currency coin.
+//   ›  settlement_price	number	Optional (not added for spot). The settlement price for the instrument. Only when state = open
+//   ›  state	string	The state of the order book. Possible values are open and closed.
+//   ›  stats	object
+//   ›    ›  high	number	Highest price during 24h
+//   ›    ›  low	number	Lowest price during 24h
+//   ›    ›  price_change	number	24-hour price change expressed as a percentage, null if there weren't any trades
+//   ›    ›  volume	number	Volume during last 24h in base currency
+//   ›    ›  volume_usd	number	Volume in usd (futures only)
+//   ›  timestamp	integer	The timestamp (milliseconds since the Unix epoch)
+//   ›  underlying_index	number	Name of the underlying future, or index_price (options only)
+//   ›  underlying_price	number	Underlying price for implied volatility calculations (options only)
+///
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct TickerData {
+    pub ask_iv: Option<f64>,
+    pub best_ask_amount: f64,
+    pub best_ask_price: Option<f64>,
+    pub best_bid_amount: f64,
+    pub best_bid_price: Option<f64>,
+    pub bid_iv: Option<f64>,
+    pub current_funding: Option<f64>,
+    pub delivery_price: Option<f64>,
+    pub estimated_delivery_price: f64,
+    pub funding_8h: Option<f64>,
+    pub greeks: Option<Greeks>,
+    pub index_price: f64,
+    pub instrument_name: String,
+    pub interest_rate: Option<f64>,
+    pub last_price: Option<f64>,
+    pub mark_iv: Option<f64>,
+    pub mark_price: f64,
+    pub max_price: f64,
+    pub min_price: f64,
+    pub open_interest: f64,
+    pub settlement_price: Option<f64>,
+    pub state: State,
+    pub stats: Stats,
+    pub timestamp: u64,
+    pub underlying_index: Option<String>,
+    pub underlying_price: Option<f64>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct Greeks {
+    pub delta: f64,
+    pub gamma: f64,
+    pub rho: f64,
+    pub theta: f64,
+    pub vega: f64,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct Stats {
+    pub high: Option<f64>,
+    pub low: Option<f64>,
+    pub volume: Option<f64>,
+    pub volume_usd: Option<f64>,
+    pub price_change: Option<f64>,
+}
+
+gen_channel!(TickerChannel, "ticker", String, Interval);
+
+impl std::fmt::Display for TickerChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ticker.{}.{}", self.0, self.1)
+    }
+}

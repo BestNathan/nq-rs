@@ -2725,15 +2725,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "derive_builder",
+ "either",
  "flume",
  "futures-util",
  "nq-app",
  "nq-env",
- "rand 0.9.0",
  "reqwest",
  "reqwest-websocket",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
@@ -2744,6 +2746,14 @@ dependencies = [
 [[package]]
 name = "nq-env"
 version = "0.1.0"
+
+[[package]]
+name = "nq-macro"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.96",
+]
 
 [[package]]
 name = "nq-mqtt"

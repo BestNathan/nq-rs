@@ -64,36 +64,36 @@ impl MessageAssembler {
 
     pub fn subscribe_message(&self, channels: Vec<String>) -> String {
         json!({
-          "jsonrpc" : "2.0",
-          "id" : self.id(),
-          "method" : "public/subscribe",
-          "params" : {
-            "channels" : channels
-          }
+            "jsonrpc" : "2.0",
+            "id" : self.id(),
+            "method" : "public/subscribe",
+            "params" : {
+                "channels" : channels
+            }
         })
         .to_string()
     }
 
     pub fn set_heartbeat_message(&self, i: i64) -> String {
         json!({
-          "jsonrpc" : "2.0",
-          "id" : self.id(),
-          "method" : "public/set_heartbeat",
-          "params" : {
-            "interval" : i,
-          }
+            "jsonrpc" : "2.0",
+            "id" : self.id(),
+            "method" : "public/set_heartbeat",
+            "params" : {
+                "interval" : i,
+            }
         })
         .to_string()
     }
 
     pub fn test_message(&self) -> String {
         json!({
-          "jsonrpc" : "2.0",
-          "id" : self.id(),
-          "method" : "public/test",
-          "params" : {
+            "jsonrpc" : "2.0",
+            "id" : self.id(),
+            "method" : "public/test",
+            "params" : {
 
-          }
+            }
         })
         .to_string()
     }

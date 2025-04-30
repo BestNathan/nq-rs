@@ -42,12 +42,9 @@ impl Application {
             debug!("application spawn runner: {runner_name:}");
 
             tt.spawn(async move {
-                match runner.run(canceltoken).await {
-                    Err(error) => {
-                        warn!(runner = runner_name, ?error, "runner error");
-                        tx.send(()).await.unwrap_or_default();
-                    }
-                    Ok(()) => {}
+                if let Err(error) = runner.run(canceltoken).await {
+                    warn!(runner = runner_name, ?error, "runner error");
+                    tx.send(()).await.unwrap_or_default();
                 };
             });
         }
@@ -99,7 +96,7 @@ mod tests {
     use anyhow::Result;
     use async_trait::async_trait;
     use std::time::Duration;
-    use tokio::time::{Instant, sleep};
+    use tokio::time::{sleep, Instant};
     use tracing::info;
 
     #[tokio::test]

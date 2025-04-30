@@ -1,35 +1,39 @@
 [workspace]
 members = [
-  "crates/*",
-  "apps/*",
-  "fluvio/connectors/*",
-  "fluvio/sdf",
-  "fluvio/smartmodules/*",
+    "crates/*",
+    "apps/*",
+    "fluvio/connectors/*",
+    "fluvio/sdf",
+    "fluvio/smartmodules/*",
 ]
 resolver = "2"
 
 [workspace.dependencies]
 
 # nq
-nq-app = {path = "./crates/nq-app"}
-nq-deribit = {path = "./crates/nq-deribit"}
-nq-env = {path = "./crates/nq-env"}
-nq-mqtt = {path = "./crates/nq-mqtt"}
+nq-app = { path = "./crates/nq-app" }
+nq-deribit = { path = "./crates/nq-deribit" }
+nq-env = { path = "./crates/nq-env" }
+nq-macro = { path = "./crates/nq-macro" }
+nq-mqtt = { path = "./crates/nq-mqtt" }
 
 # fluvio
-fluvio = {git = "https://github.com/infinyon/fluvio", tag = "v0.16.1"}
-fluvio-connector-common = {git = "https://github.com/infinyon/fluvio", tag = "v0.16.1", features = ["derive"]}
+fluvio = { git = "https://github.com/infinyon/fluvio", tag = "v0.16.1" }
+fluvio-connector-common = { git = "https://github.com/infinyon/fluvio", tag = "v0.16.1", features = ["derive"] }
 
 # other
 anyhow = "1.0.97"
+thiserror = "1"
+derive_builder = "0.20.2"
 async-trait = "0.1.88"
+either = { version = "1", features = ["serde"] }
 flume = "0.11.1"
 futures-util = "0.3.31"
-serde = {version = "1.0.219", features = ["derive"]}
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sqlx = "0.8"
-tokio = {version = "1.44.1", features = ["full"]}
-tokio-util = {version = "0.7.13", features = ["rt"]}
+tokio = { version = "1.44.1", features = ["full"] }
+tokio-util = { version = "0.7.13", features = ["rt"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 
@@ -37,3 +41,9 @@ tracing-subscriber = "0.3.19"
 inherits = "release"
 lto = true
 strip = "symbols"
+
+[profile.dev]
+opt-level = 1
+debug = true
+split-debuginfo = "packed"
+overflow-checks = true

@@ -3,7 +3,7 @@ use std::{env, sync::Arc};
 use anyhow::Result;
 use async_trait::async_trait;
 use nq_app::{application::Application, runner::Runner};
-use nq_deribit::message::SubscriptionParams;
+use nq_deribit::client::ConfigBuilder;
 use rumqttc::{AsyncClient, QoS};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
@@ -11,14 +11,16 @@ use tracing::{info, trace, warn};
 
 const SUBSCRIPTION: &str = include_str!("../resources/subscription.txt");
 const DERIBIT_SUBSCRIPTION_TOPIC: &str = "t/deribit/subscription";
+const DERIBIT_SUBSCRIPTION_TOPIC_ENV: &str = "DERIBIT_SUBSCRIPTION_TOPIC";
+const DERIBIT_API_CLIENT_ID_ENV: &str = "DERIBIT_API_CLIENT_ID";
+const DERIBIT_API_CLIENT_SECRET_ENV: &str = "DERIBIT_API_CLIENT_SECRET";
 
 fn deribit_subscription_topic() -> String {
-    env::var("DERIBIT_SUBSCRIPTION_TOPIC").unwrap_or(DERIBIT_SUBSCRIPTION_TOPIC.to_string())
+    env::var(DERIBIT_SUBSCRIPTION_TOPIC_ENV).unwrap_or(DERIBIT_SUBSCRIPTION_TOPIC.to_string())
 }
 
 struct App {
-    deribit_writer: nq_deribit::client::MessageWriter,
-    deribit_subscriber: nq_deribit::client::MessageSubscriber,
+    deribit_subscriber: nq_deribit::sub::DeribitSubscriptionClient,
     mqtt_async_client: AsyncClient,
 }
 
@@ -30,45 +32,24 @@ impl Runner for App {
         info!("app is running...");
         info!("");
 
-        info!(
-            "deribit subscriptions: {}",
-            SUBSCRIPTION.replace("\n", ", ")
-        );
-        info!("");
-
-        if SUBSCRIPTION.len() == 0 {
-            warn!("no deribit subscriptions");
-            return Ok(());
-        }
-
-        select! {
-            _ = canceltoken.cancelled() => {},
-            _ = async {
-                self.deribit_writer.subscribe(SUBSCRIPTION.split("\n").map(|v| v.to_string()).collect()).await.unwrap();
-            } => {  }
-        };
-
         loop {
             select! {
                 _ = canceltoken.cancelled() => break,
                 msg = self.deribit_subscriber.recv() => {
                     match msg {
-                        Some(ref smsg) => {
-                            if let SubscriptionParams::Subscribe(p) = &smsg.params {
-                                trace!("recv subscription message from channel: {:}", p.channel);
+                        Ok(data) => {
+                            trace!("recv subscription data: {:?}", data);
 
-                                let payload = serde_json::to_string(&smsg).unwrap();
+                            let payload = serde_json::to_string(&data).unwrap();
 
-                                self.mqtt_async_client.publish(
-                                    topic.clone(),
-                                    QoS::AtLeastOnce,
-                                    true,
-                                    payload,
-                                ).await?;
-
-                            };
+                            self.mqtt_async_client.publish(
+                                topic.clone(),
+                                QoS::AtLeastOnce,
+                                true,
+                                payload,
+                            ).await?;
                         },
-                        None => {
+                        Err(_) => {
                             info!("no more subscription messages");
                             break;
                         }
@@ -85,10 +66,29 @@ impl Runner for App {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    info!(
+        "deribit subscriptions: {}",
+        SUBSCRIPTION.replace("\n", ", ")
+    );
+    info!("");
+
+    if SUBSCRIPTION.len() == 0 {
+        warn!("no deribit subscriptions");
+        return Ok(());
+    }
+
     let application = Application::new();
 
-    let deribit_client = nq_deribit::client::Client::builder().build()?;
-    let (deribit_writer, deribit_subscriber) = deribit_client.split();
+    let deribit_config = ConfigBuilder::default()
+        .public_subscribe_channels(SUBSCRIPTION.split("\n").map(|v| v.to_string()).collect())
+        .client_id(env::var(DERIBIT_API_CLIENT_ID_ENV).ok())
+        .client_secret(env::var(DERIBIT_API_CLIENT_SECRET_ENV).ok())
+        .build()?;
+    let deribit_client = nq_deribit::client::Client::builder()
+        .config(deribit_config)
+        .build()?;
+    let deribit_subscriber = deribit_client.subscription_client();
+
     application.add_runner(Arc::new(deribit_client));
 
     let mqtt_client = nq_mqtt::client::Client::builder()
@@ -99,7 +99,6 @@ async fn main() -> Result<()> {
     application.add_runner(Arc::new(mqtt_client));
 
     let app = App {
-        deribit_writer,
         deribit_subscriber,
         mqtt_async_client,
     };

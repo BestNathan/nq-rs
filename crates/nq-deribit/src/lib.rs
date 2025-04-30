@@ -1,2 +1,10 @@
+pub mod api;
 pub mod client;
+pub mod model;
+pub mod deribit;
+pub mod errors;
+pub mod jsonrpc;
 pub mod message;
+pub mod request;
+pub mod sub;
+pub mod subscription;
