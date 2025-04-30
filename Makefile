@@ -9,7 +9,6 @@ deribit-subscription:
 	@docker run -d --name deribit-subscription \
 	    --restart always \
 	    --env-file $(DERIBIT_NQ_HOME)/env/.env.credential \
-	    -e DERIBIT_SUBSCRIPTION_TOPIC=t/deribit/subscription/test \
 	    nq-rs/deribit-subscription
 
 FLUVIO_HOST=none
