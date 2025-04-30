@@ -4,8 +4,8 @@ DERIBIT_NQ_HOME=$(HOME)/.nq/deribit
 .PHONY: deribit-subscription
 
 deribit-subscription:
-	@docker rm -f deribit-subscription
 	docker build -t nq-rs/deribit-subscription --build-arg APP=deribit-subscription --build-arg PROXY=http://192.168.2.98:8890 .
+	@docker rm -f deribit-subscription
 	@docker run -d --name deribit-subscription \
 	    --restart always \
 	    --env-file $(DERIBIT_NQ_HOME)/env/.env.credential \
