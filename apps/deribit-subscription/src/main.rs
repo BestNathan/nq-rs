@@ -40,13 +40,11 @@ impl Runner for App {
                         Ok(data) => {
                             trace!("recv subscription data: {:?}", data);
 
-                            let payload = serde_json::to_string(&data).unwrap();
-
                             self.mqtt_async_client.publish(
                                 topic.clone(),
                                 QoS::AtLeastOnce,
                                 true,
-                                payload,
+                                data,
                             ).await?;
                         },
                         Err(_) => {
