@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use nq_app::application::Application;
+use nq_app::{application::Application, runner::Runner};
 use nq_deribit::connection::ConnectionConfigBuilder;
 use nq_deribit::pool::{ConnectionPool, PoolConfig};
-use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 mod config;
@@ -35,18 +34,21 @@ async fn main() -> Result<()> {
         connection_config: conn_config,
     }));
 
-    // 2. Create Application and add connection runners
-    let application = Application::new();
+    let ct = pool.cancel_token();
+
+    // 2. Spawn connection eventloops FIRST — they must be running before any API calls
     for conn in pool.connection_runners() {
-        application.add_runner(conn);
+        let ct = ct.clone();
+        tokio::spawn(async move {
+            let _ = conn.run(ct).await;
+        });
     }
 
-    // 3. Create MQTT client
+    // 3. Create MQTT client (spawns its own eventloop internally)
     let mqtt_client = nq_mqtt::client::Client::builder()
         .set_host(nq_env::emqx::host())
         .build();
     let mqtt_async_client = mqtt_client.inner();
-    application.add_runner(Arc::new(mqtt_client));
 
     // 4. Create InstrumentFetcher
     let fetcher = Arc::new(InstrumentFetcher::new(pool.first_connection()));
@@ -61,6 +63,7 @@ async fn main() -> Result<()> {
     ));
 
     // 6. Initialize: fetch all options and subscribe to their tickers
+    //    (connections are now running, so call_api will work)
     sub_mgr.initialize().await?;
 
     // 7. Subscribe to instrument_state channels
@@ -70,7 +73,8 @@ async fn main() -> Result<()> {
     info!(channels = ?inst_state_channels, "subscribing to instrument_state");
     pool.subscribe(inst_state_channels).await?;
 
-    // 8. Add SubscriptionManager and TickerRouter as runners
+    // 8. Run SubscriptionManager and TickerRouter
+    let application = Application::new();
     application.add_runner(sub_mgr);
     application.add_runner(Arc::new(TickerRouter::new(
         pool,
@@ -78,9 +82,7 @@ async fn main() -> Result<()> {
         config.mqtt_topic_prefix,
     )));
 
-    // 9. Run
     info!("all components started");
-    let ct = CancellationToken::new();
     application.run(ct).await;
 
     Ok(())

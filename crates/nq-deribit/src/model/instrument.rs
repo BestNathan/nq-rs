@@ -123,7 +123,7 @@ pub struct InstrumentInfo {
     pub creation_timestamp: u64,
     pub expiration_timestamp: u64,
     pub tick_size: f64,
-    pub contract_size: i64,
+    pub contract_size: f64,
     pub state: String,
     #[serde(default)]
     pub strike: Option<f64>,

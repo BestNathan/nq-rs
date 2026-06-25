@@ -85,19 +85,22 @@ impl Connection {
             set.extend(channels.iter().cloned());
         }
 
-        let req = PublicSubscribeRequest::new(channels.clone());
-        let resp = self.call_api(req).await;
-
-        match resp {
-            Ok(_) => {
-                debug!(connection_id = self.id, "subscribed to {} channels", channels.len());
-                Ok(())
-            }
-            Err(e) => {
-                warn!(connection_id = self.id, error = ?e, "subscribe failed, channels will retry on reconnect");
-                Ok(()) // channels are in the set, will retry on reconnect
+        // Batch subscribe in chunks to avoid oversized WS messages
+        const BATCH_SIZE: usize = 100;
+        for chunk in channels.chunks(BATCH_SIZE) {
+            let req = PublicSubscribeRequest::new(chunk.to_vec());
+            match self.call_api(req).await {
+                Ok(_) => {
+                    debug!(connection_id = self.id, "subscribed to {} channels", chunk.len());
+                }
+                Err(e) => {
+                    warn!(connection_id = self.id, error = ?e, batch_size = chunk.len(),
+                        "subscribe batch failed, channels will retry on reconnect");
+                }
             }
         }
+
+        Ok(())
     }
 
     /// Unsubscribe from channels and remove from the live set.
@@ -266,19 +269,24 @@ impl Connection {
                             }
                         }
 
-                        // 3. Re-subscribe all tracked channels
+                        // 3. Re-subscribe all tracked channels (batched)
                         let channel_list: Vec<String> = channels.into_iter().collect();
                         if !channel_list.is_empty() {
-                            let sub_id = 700_000 + conn_id as i64;
-                            let mut sub_val = serde_json::to_value(&PublicSubscribeRequest::new(channel_list.clone()))?;
-                            if let Some(obj) = sub_val.as_object_mut() {
-                                obj.insert("jsonrpc".to_string(), json!("2.0"));
-                                obj.insert("id".to_string(), json!(sub_id));
+                            const BATCH_SIZE: usize = 100;
+                            let mut base_id = 700_000 + conn_id as i64;
+                            for chunk in channel_list.chunks(BATCH_SIZE) {
+                                let sub_id = base_id;
+                                base_id += 1;
+                                let mut sub_val = serde_json::to_value(&PublicSubscribeRequest::new(chunk.to_vec()))?;
+                                if let Some(obj) = sub_val.as_object_mut() {
+                                    obj.insert("jsonrpc".to_string(), json!("2.0"));
+                                    obj.insert("id".to_string(), json!(sub_id));
+                                }
+                                let (tx, rx) = oneshot::channel();
+                                el_payload_tx.send_async(sub_val.to_string()).await?;
+                                el_responser_tx.send_async((sub_id, tx)).await?;
+                                let _ = tokio::time::timeout(Duration::from_secs(30), rx).await?;
                             }
-                            let (tx, rx) = oneshot::channel();
-                            el_payload_tx.send_async(sub_val.to_string()).await?;
-                            el_responser_tx.send_async((sub_id, tx)).await?;
-                            let _ = tokio::time::timeout(Duration::from_secs(30), rx).await?;
                             info!(connection_id = conn_id, "re-subscribed {} channels", channel_list.len());
                         }
 

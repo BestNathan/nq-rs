@@ -3,6 +3,8 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use futures_util::Stream;
+use nq_app::runner::Runner;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::connection::{Connection, ConnectionConfig};
@@ -12,6 +14,7 @@ pub struct ConnectionPool {
     capacity: usize,
     next_id: AtomicUsize,
     base_config: ConnectionConfig,
+    cancel_token: CancellationToken,
 }
 
 pub struct PoolConfig {
@@ -21,12 +24,14 @@ pub struct PoolConfig {
 
 impl ConnectionPool {
     pub fn new(config: PoolConfig) -> Self {
+        let cancel_token = CancellationToken::new();
         let first = Arc::new(Connection::new(0, config.connection_config.clone()));
         Self {
             connections: Arc::new(RwLock::new(vec![first])),
             capacity: config.capacity_per_connection,
             next_id: AtomicUsize::new(1),
             base_config: config.connection_config,
+            cancel_token,
         }
     }
 
@@ -60,14 +65,19 @@ impl ConnectionPool {
         futures_util::stream::select_all(streams)
     }
 
-    /// Returns a snapshot of all connections. Call once at startup to add
-    /// them as Runners to the Application.
+    /// Returns a snapshot of all connections. Call once at startup if you want
+    /// to manage Runner lifecycle externally. If you don't call this, the pool
+    /// auto-spawns eventloops for all connections.
     pub fn connection_runners(&self) -> Vec<Arc<Connection>> {
         self.connections.read().unwrap().clone()
     }
 
     pub fn first_connection(&self) -> Arc<Connection> {
         self.connections.read().unwrap()[0].clone()
+    }
+
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
     }
 
     fn find_or_create_connection(&self) -> Arc<Connection> {
@@ -80,17 +90,22 @@ impl ConnectionPool {
             }
         }
 
-        // All full — create new connection
+        // All full — create new connection and auto-spawn its eventloop
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let conn = Arc::new(Connection::new(id, self.base_config.clone()));
         {
             let mut conns = self.connections.write().unwrap();
             conns.push(conn.clone());
         }
-        info!(connection_id = id, "pool created new connection");
+        info!(connection_id = id, "pool created and spawning new connection");
 
-        // NOTE: The new connection won't have a Runner spawned yet.
-        // Callers should ensure pool is sized correctly upfront.
+        // Auto-spawn eventloop for the new connection
+        let ct = self.cancel_token.clone();
+        let conn_clone = conn.clone();
+        tokio::spawn(async move {
+            let _ = conn_clone.run(ct).await;
+        });
+
         conn
     }
 }
