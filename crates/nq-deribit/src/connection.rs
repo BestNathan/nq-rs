@@ -13,7 +13,7 @@ use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
 use serde_json::{Value, json};
 use tokio::{select, sync::oneshot};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
 
 use crate::errors::DeribitError::RequestTimeout;
 use crate::jsonrpc::{JSPNRPCRequest, JSONRPCResponse};
