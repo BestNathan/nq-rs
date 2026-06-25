@@ -3,7 +3,7 @@ use std::{fmt::Display, str::FromStr};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Currency {
     BTC,
