@@ -135,7 +135,7 @@ Allocation strategy: Round-robin with capacity check. When subscribing, find the
 ### New: `GetInstrumentsRequest` (`crates/nq-deribit/src/request/market_data.rs`)
 
 ```rust
-impl_request!(GetInstrumentsRequest, GetInstrumentsResponse, "public/get_instruments", false);
+impl_request!(GetInstrumentsRequest, GetInstrumentsResponse, "public/get_instruments");
 
 pub struct GetInstrumentsRequest {
     pub currency: Currency,
