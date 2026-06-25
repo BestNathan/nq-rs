@@ -11,6 +11,16 @@ deribit-subscription:
 	    --env-file $(DERIBIT_NQ_HOME)/env/.env.credential \
 	    nq-rs/deribit-subscription
 
+.PHONY: deribit-option-monitor
+
+deribit-option-monitor:
+	docker build -t nq-rs/deribit-option-monitor --build-arg APP=deribit-option-monitor --build-arg PROXY=http://192.168.2.98:8890 .
+	@docker rm -f deribit-option-monitor
+	@docker run -d --name deribit-option-monitor \
+	    --restart always \
+	    --env-file $(DERIBIT_NQ_HOME)/env/.env.credential \
+	    nq-rs/deribit-option-monitor
+
 FLUVIO_HOST=none
 FLUVIO_CONNECTOR_WORKDIR=/home/fluvio/connector
 FLUVIO_CONNECTOR_CONFIG=$(FLUVIO_CONNECTOR_WORKDIR)/connector.yaml
