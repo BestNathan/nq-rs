@@ -875,6 +875,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "deribit-option-monitor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "flume",
+ "futures-util",
+ "nq-app",
+ "nq-deribit",
+ "nq-env",
+ "nq-mqtt",
+ "rumqttc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "deribit-rv-response-to-line"
 version = "0.1.0"
 dependencies = [
