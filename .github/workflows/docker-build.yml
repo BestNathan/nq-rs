@@ -2,9 +2,10 @@ name: Build Docker Images
 
 on:
   push:
-    branches: ["*"]
+    branches: ["**"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -43,9 +44,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}/${{ matrix.app }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix={{branch}}-
+            type=sha,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push
