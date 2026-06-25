@@ -43,6 +43,16 @@ impl ConnectionPool {
         conn.subscribe(channels).await
     }
 
+    /// Re-subscribe all tracked channels on all connections.
+    /// Call this periodically to recover from WS reconnects.
+    pub async fn resubscribe_all(&self) -> Result<()> {
+        let conns = self.connections.read().unwrap().clone();
+        for conn in &conns {
+            conn.resubscribe_all().await?;
+        }
+        Ok(())
+    }
+
     pub async fn unsubscribe(&self, channels: Vec<String>) -> Result<()> {
         if channels.is_empty() {
             return Ok(());

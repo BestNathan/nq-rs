@@ -103,6 +103,31 @@ impl Connection {
         Ok(())
     }
 
+    /// Re-subscribe all channels currently in the tracked set.
+    /// Useful after reconnect when the WS subscription state may be lost.
+    pub async fn resubscribe_all(&self) -> Result<()> {
+        let channels: Vec<String> = self.channels.read().unwrap().iter().cloned().collect();
+        if channels.is_empty() {
+            return Ok(());
+        }
+
+        const BATCH_SIZE: usize = 100;
+        let mut success = 0;
+        let mut failed = 0;
+        for chunk in channels.chunks(BATCH_SIZE) {
+            let req = PublicSubscribeRequest::new(chunk.to_vec());
+            match self.call_api(req).await {
+                Ok(_) => success += chunk.len(),
+                Err(e) => {
+                    warn!(connection_id = self.id, error = ?e, "resubscribe batch failed");
+                    failed += chunk.len();
+                }
+            }
+        }
+        info!(connection_id = self.id, success, failed, total = channels.len(), "resubscribe_all done");
+        Ok(())
+    }
+
     /// Unsubscribe from channels and remove from the live set.
     pub async fn unsubscribe(&self, channels: Vec<String>) -> Result<()> {
         if channels.is_empty() {
@@ -293,7 +318,7 @@ impl Connection {
                         Ok::<(), anyhow::Error>(())
                     }.await;
                     if let Err(e) = res {
-                        err_tx.send_async(e).await.unwrap_or_default();
+                        warn!(connection_id = conn_id, error = ?e, "setup task failed, will retry on next reconnect");
                     }
                 });
             }
