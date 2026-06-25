@@ -8,3 +8,5 @@ pub mod message;
 pub mod request;
 pub mod sub;
 pub mod subscription;
+pub mod connection;
+pub mod pool;
