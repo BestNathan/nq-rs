@@ -235,8 +235,10 @@ impl Connection {
         debug!(connection_id = self.id, "connection eventloop begin");
 
         // Bounded channels for per-reconnect eventloop communication
-        let (el_payload_tx, el_payload_rx) = flume::bounded::<String>(100);
-        let (el_responser_tx, el_responser_rx) = flume::bounded::<(i64, oneshot::Sender<String>)>(100);
+        // These handle a small, predictable number of setup messages (heartbeat/auth/subscribe)
+        // so unbounded is safe here — no OOM risk.
+        let (el_payload_tx, el_payload_rx) = flume::unbounded::<String>();
+        let (el_responser_tx, el_responser_rx) = flume::unbounded::<(i64, oneshot::Sender<String>)>();
 
         loop {
             if ct.is_cancelled() {
