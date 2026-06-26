@@ -255,6 +255,7 @@ impl Connection {
             let (err_tx, err_rx) = flume::bounded(1);
             let mut responser_map: HashMap<i64, oneshot::Sender<String>> = HashMap::new();
             let mut message_map: HashMap<i64, String> = HashMap::new();
+            const MAX_MAP_SIZE: usize = 1000;
 
             // Setup task: heartbeat, auth, re-subscribe tracked channels
             {
@@ -352,6 +353,11 @@ impl Connection {
                         if let Some(text) = message_map.remove(&id) {
                             let _ = responser.send(text);
                         } else {
+                            // Prevent unbounded growth: if map is too large, clear stale entries
+                            if responser_map.len() >= MAX_MAP_SIZE {
+                                warn!(connection_id = self.id, map_size = responser_map.len(), "responser_map too large, clearing");
+                                responser_map.clear();
+                            }
                             responser_map.insert(id, responser);
                         }
                     }
@@ -359,6 +365,10 @@ impl Connection {
                         if let Some(text) = message_map.remove(&id) {
                             let _ = responser.send(text);
                         } else {
+                            if responser_map.len() >= MAX_MAP_SIZE {
+                                warn!(connection_id = self.id, map_size = responser_map.len(), "responser_map too large, clearing");
+                                responser_map.clear();
+                            }
                             responser_map.insert(id, responser);
                         }
                     }
@@ -394,6 +404,11 @@ impl Connection {
                             if let Some(responser) = responser_map.remove(&id) {
                                 let _ = responser.send(text);
                             } else {
+                                // Prevent unbounded growth
+                                if message_map.len() >= MAX_MAP_SIZE {
+                                    warn!(connection_id = self.id, map_size = message_map.len(), "message_map too large, clearing");
+                                    message_map.clear();
+                                }
                                 message_map.insert(id, text);
                             }
                             continue;

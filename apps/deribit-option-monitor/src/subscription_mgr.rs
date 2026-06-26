@@ -224,10 +224,24 @@ impl Runner for SubscriptionManager {
                         let conn_count = pool3.connection_count();
                         let conns = pool3.connection_runners();
                         let channel_counts: Vec<usize> = conns.iter().map(|c| c.channel_count()).collect();
+
+                        // Read memory usage from /proc/self/status
+                        let memory_info = std::fs::read_to_string("/proc/self/status")
+                            .ok()
+                            .and_then(|content| {
+                                let vm_rss = content.lines()
+                                    .find(|line| line.starts_with("VmRSS:"))
+                                    .and_then(|line| line.split_whitespace().nth(1))
+                                    .unwrap_or("unknown");
+                                Some(vm_rss.to_string())
+                            })
+                            .unwrap_or_else(|| "unavailable".to_string());
+
                         info!(
                             tracked_options = t_count,
                             connections = conn_count,
                             channel_counts = ?channel_counts,
+                            memory_kb = memory_info,
                             "periodic metrics"
                         );
                     }

@@ -125,6 +125,7 @@ impl Client {
             let (err_tx, err_rx) = flume::bounded(1);
             let mut responser_map: HashMap<i64, oneshot::Sender<String>> = HashMap::new();
             let mut message_map: HashMap<i64, String> = HashMap::new();
+            const MAX_MAP_SIZE: usize = 1000;
 
             // setup
             {
@@ -205,6 +206,11 @@ impl Client {
                                 warn!("deribit client missing message responser for id={}", id);
                             }
                         } else {
+                            // Prevent unbounded growth
+                            if responser_map.len() >= MAX_MAP_SIZE {
+                                warn!(map_size = responser_map.len(), "responser_map too large, clearing");
+                                responser_map.clear();
+                            }
                             responser_map.insert(id, responser);
                         }
                     }
@@ -258,6 +264,11 @@ impl Client {
                             let responser = match responser_map.remove(&id) {
                                 Some(r) => {r}
                                 None => {
+                                    // Prevent unbounded growth
+                                    if message_map.len() >= MAX_MAP_SIZE {
+                                        warn!(map_size = message_map.len(), "message_map too large, clearing");
+                                        message_map.clear();
+                                    }
                                     message_map.insert(id, text);
                                     continue;
                                 }
