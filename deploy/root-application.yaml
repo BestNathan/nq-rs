@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: git@github.com:BestNathan/nq-rs.git
+    repoURL: https://github.com/BestNathan/nq-rs.git
     targetRevision: main
     path: deploy
   destination:
