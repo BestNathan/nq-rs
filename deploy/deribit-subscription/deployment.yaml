@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deribit-subscription
+  labels:
+    app: deribit-subscription
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: deribit-subscription
+  template:
+    metadata:
+      labels:
+        app: deribit-subscription
+    spec:
+      containers:
+        - name: deribit-subscription
+          image: bestnathan/nq-rs:deribit-subscription-latest
+          envFrom:
+            - configMapRef:
+                name: nq-rs-config
+            - secretRef:
+                name: nq-rs-secrets
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"

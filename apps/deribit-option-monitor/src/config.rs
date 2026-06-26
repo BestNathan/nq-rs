@@ -6,7 +6,7 @@ use nq_deribit::model::interval::Interval;
 const DEFAULT_CURRENCIES: &str = "BTC,ETH";
 const DEFAULT_TICKER_INTERVAL: &str = "agg2";
 const DEFAULT_MQTT_TOPIC_PREFIX: &str = "t/deribit/option_ticker";
-const DEFAULT_POLL_INTERVAL_SECS: u64 = 60;
+const DEFAULT_POLL_INTERVAL_SECS: u64 = 300;
 const DEFAULT_POOL_CAPACITY: usize = 200;
 
 pub struct AppConfig {

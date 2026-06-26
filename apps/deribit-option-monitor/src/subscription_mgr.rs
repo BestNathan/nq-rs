@@ -102,11 +102,7 @@ impl Runner for SubscriptionManager {
                 select! {
                     _ = ct1.cancelled() => break,
                     _ = sleep(Duration::from_secs(poll_secs)) => {
-                        // Periodically re-subscribe all tracked channels to recover from WS reconnects
-                        if let Err(e) = pool1.resubscribe_all().await {
-                            warn!(error = ?e, "poll resubscribe_all failed");
-                        }
-
+                        // Poll for new options — only subscribe the diff
                         match fetcher1.fetch_all_options(&currencies1).await {
                             Ok(options) => {
                                 let names: Vec<String> = options.iter().map(|o| o.instrument_name.clone()).collect();
@@ -118,12 +114,14 @@ impl Runner for SubscriptionManager {
                                     let channels: Vec<String> = new.iter()
                                         .map(|n| format!("ticker.{}.{}", n, interval))
                                         .collect();
-                                    info!(count = channels.len(), "poll discovered new options");
+                                    info!(count = channels.len(), total = names.len(), "poll discovered new options");
                                     if let Err(e) = pool1.subscribe(channels).await {
                                         warn!(error = ?e, "poll subscribe failed");
                                     }
                                     let mut t = tracked1.write().unwrap();
                                     t.extend(new);
+                                } else {
+                                    debug!(total = names.len(), "poll: no new options");
                                 }
                             }
                             Err(e) => {
