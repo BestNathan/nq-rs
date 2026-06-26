@@ -16,12 +16,11 @@ spec:
     spec:
       containers:
         - name: deribit-subscription
-          image: bestnathan/nq-rs:deribit-subscription-latest
-          envFrom:
-            - configMapRef:
-                name: nq-rs-config
-            - secretRef:
-                name: nq-rs-secrets
+          image: ghcr.io/bestnathan/nq-rs/deribit-subscription:latest
+          imagePullPolicy: Always
+          env:
+            - name: RUST_LOG
+              value: info
           resources:
             requests:
               memory: "128Mi"
@@ -29,3 +28,7 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "500m"
+      imagePullSecrets:
+        - name: ghcr-bestnathan
+      nodeSelector:
+        kubernetes.io/arch: amd64
