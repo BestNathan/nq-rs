@@ -1,31 +1,54 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: deribit-option-monitor
+  name: option-monitor
   labels:
-    app: deribit-option-monitor
+    app: option-monitor
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: deribit-option-monitor
+      app: option-monitor
   template:
     metadata:
       labels:
-        app: deribit-option-monitor
+        app: option-monitor
     spec:
       containers:
-        - name: deribit-option-monitor
-          image: bestnathan/nq-rs:deribit-option-monitor-latest
-          envFrom:
-            - configMapRef:
-                name: nq-rs-config
-            - secretRef:
-                name: nq-rs-secrets
+        - name: option-monitor
+          image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-875a393
+          imagePullPolicy: Always
+          env:
+            - name: RUST_LOG
+              value: info
+            - name: DERIBIT_API_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: option-monitor-secrets
+                  key: DERIBIT_CLIENT_ID
+            - name: DERIBIT_API_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: option-monitor-secrets
+                  key: DERIBIT_CLIENT_SECRET
+            - name: EMQX_HOST
+              value: emqx-nodeport.emqx.svc.cluster.local
+            - name: ALL_PROXY
+              value: http://192.168.2.98:8890
+            - name: HTTPS_PROXY
+              value: http://192.168.2.98:8890
+            - name: DERIBIT_OPTION_CURRENCIES
+              value: BTC,ETH
+            - name: DERIBIT_OPTION_TICKER_INTERVAL
+              value: agg2
           resources:
             requests:
               memory: "128Mi"
               cpu: "100m"
             limits:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "500m"
+      imagePullSecrets:
+        - name: ghcr-bestnathan
+      nodeSelector:
+        kubernetes.io/arch: amd64
