@@ -413,8 +413,20 @@ impl Connection {
                                     let _ = el_payload_tx.send_async(test_payload).await;
                                 }
                                 "subscription" => {
-                                    if self.subscription_tx.send_async(text).await.is_err() {
-                                        warn!(connection_id = self.id, "subscription rx dropped");
+                                    // Use try_send to avoid blocking the WS reader when channel is full.
+                                    // If we block here, the WS library's internal buffers grow unboundedly,
+                                    // causing OOM. Dropping messages is preferable — the next ticker update
+                                    // will arrive shortly and replace the dropped one.
+                                    match self.subscription_tx.try_send(text) {
+                                        Ok(_) => {}
+                                        Err(flume::TrySendError::Full(_)) => {
+                                            // Rate-limit this warning to avoid log spam
+                                            // (only log occasionally when channel is full)
+                                            warn!(connection_id = self.id, "subscription channel full, dropping ticker message");
+                                        }
+                                        Err(flume::TrySendError::Disconnected(_)) => {
+                                            warn!(connection_id = self.id, "subscription rx disconnected");
+                                        }
                                     }
                                 }
                                 _ => {
@@ -457,8 +469,9 @@ pub struct ConnectionConfig {
     #[builder(default)]
     pub client_secret: Option<String>,
     /// Capacity of the subscription message channel (Deribit → consumer).
-    /// When full, the WS reader blocks, providing natural backpressure.
-    #[builder(default = "10000")]
+    /// When full, messages are dropped (via try_send) to avoid blocking the WS reader,
+    /// which would cause the WS library's internal buffers to grow unboundedly.
+    #[builder(default = "50000")]
     pub subscription_channel_capacity: usize,
     /// Capacity of the outgoing message channel (producer → WS writer).
     #[builder(default = "1000")]

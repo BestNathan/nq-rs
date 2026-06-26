@@ -282,8 +282,15 @@ impl Client {
                                     }
                                 }
                                 "subscription" => {
-                                    if let Err(_) = self.subscription_tx.send_async(text).await {
-                                        warn!("deribit client send subscription message fail");
+                                    // Use try_send to avoid blocking WS reader when channel is full
+                                    match self.subscription_tx.try_send(text) {
+                                        Ok(_) => {}
+                                        Err(flume::TrySendError::Full(_)) => {
+                                            warn!("subscription channel full, dropping ticker message");
+                                        }
+                                        Err(flume::TrySendError::Disconnected(_)) => {
+                                            warn!("subscription rx disconnected");
+                                        }
                                     }
                                 }
                                 _ => {
@@ -327,8 +334,8 @@ pub struct Config {
     #[builder(default)]
     pub client_secret: Option<String>,
     /// Capacity of the subscription message channel (Deribit → consumer).
-    /// When full, the WS reader blocks, providing natural backpressure.
-    #[builder(default = "10000")]
+    /// When full, messages are dropped (via try_send) to avoid blocking the WS reader.
+    #[builder(default = "50000")]
     pub subscription_channel_capacity: usize,
     /// Capacity of the outgoing message channel (producer → WS writer).
     #[builder(default = "1000")]
