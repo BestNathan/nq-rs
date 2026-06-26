@@ -91,11 +91,14 @@ impl Connection {
 
         // Batch subscribe in chunks to avoid oversized WS messages
         const BATCH_SIZE: usize = 100;
+        let total = channels.len();
+        let mut done = 0usize;
         for chunk in channels.chunks(BATCH_SIZE) {
             let req = PublicSubscribeRequest::new(chunk.to_vec());
             match self.call_api(req).await {
                 Ok(_) => {
-                    debug!(connection_id = self.id, "subscribed to {} channels", chunk.len());
+                    done += chunk.len();
+                    info!(connection_id = self.id, progress = %format!("{}/{}", done, total), "subscribed batch");
                 }
                 Err(e) => {
                     warn!(connection_id = self.id, error = ?e, batch_size = chunk.len(),
@@ -116,19 +119,23 @@ impl Connection {
         }
 
         const BATCH_SIZE: usize = 100;
-        let mut success = 0;
+        let total = channels.len();
+        let mut done = 0usize;
         let mut failed = 0;
         for chunk in channels.chunks(BATCH_SIZE) {
             let req = PublicSubscribeRequest::new(chunk.to_vec());
             match self.call_api(req).await {
-                Ok(_) => success += chunk.len(),
+                Ok(_) => {
+                    done += chunk.len();
+                    info!(connection_id = self.id, progress = %format!("{}/{}", done, total), "resubscribed batch");
+                }
                 Err(e) => {
                     warn!(connection_id = self.id, error = ?e, "resubscribe batch failed");
                     failed += chunk.len();
                 }
             }
         }
-        info!(connection_id = self.id, success, failed, total = channels.len(), "resubscribe_all done");
+        info!(connection_id = self.id, success = done, failed, total, "resubscribe_all done");
         Ok(())
     }
 
