@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/BestNathan/nq-rs.git
-    targetRevision: main
+    targetRevision: feat/deribit
     path: deploy
   destination:
     server: https://kubernetes.default.svc
