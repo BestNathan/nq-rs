@@ -5,6 +5,7 @@ pub mod deribit;
 pub mod errors;
 pub mod jsonrpc;
 pub mod message;
+pub mod metrics;
 pub mod request;
 pub mod sub;
 pub mod subscription;

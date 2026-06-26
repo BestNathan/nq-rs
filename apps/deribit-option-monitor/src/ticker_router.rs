@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use nq_app::runner::Runner;
 use nq_deribit::message::{SubscriptionMessage, SubscriptionParams};
+use nq_deribit::metrics;
 use nq_deribit::pool::ConnectionPool;
 use nq_deribit::subscription::ticker::TickerData;
 use rumqttc::{AsyncClient, QoS};
@@ -80,7 +81,10 @@ impl Runner for TickerRouter {
                             false,
                             payload,
                         ).await {
+                            metrics::MQTT_PUBLISH_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             warn!(error = ?e, topic = topic, "mqtt publish failed");
+                        } else {
+                            metrics::MQTT_PUBLISHED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
                     }
                 }

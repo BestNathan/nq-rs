@@ -211,38 +211,45 @@ impl Runner for SubscriptionManager {
             debug!("instrument state loop done");
         });
 
-        // Task 3: Periodic metrics logging
+        // Task 3: Periodic metrics logging (every 60 seconds)
         let ct3 = ct.clone();
         let tracked3 = tracked.clone();
         let pool3 = pool.clone();
+        let mut prev_snapshot = nq_deribit::metrics::MetricsSnapshot::read();
         tokio::spawn(async move {
             loop {
                 select! {
                     _ = ct3.cancelled() => break,
-                    _ = sleep(Duration::from_secs(300)) => {
+                    _ = sleep(Duration::from_secs(60)) => {
+                        let snapshot = nq_deribit::metrics::MetricsSnapshot::read();
+                        let rates = snapshot.rates_since(&prev_snapshot, 60.0);
+                        prev_snapshot = snapshot;
+
                         let t_count = tracked3.read().unwrap().len();
                         let conn_count = pool3.connection_count();
                         let conns = pool3.connection_runners();
                         let channel_counts: Vec<usize> = conns.iter().map(|c| c.channel_count()).collect();
 
-                        // Read memory usage from /proc/self/status
-                        let memory_info = std::fs::read_to_string("/proc/self/status")
-                            .ok()
-                            .and_then(|content| {
-                                let vm_rss = content.lines()
-                                    .find(|line| line.starts_with("VmRSS:"))
-                                    .and_then(|line| line.split_whitespace().nth(1))
-                                    .unwrap_or("unknown");
-                                Some(vm_rss.to_string())
-                            })
-                            .unwrap_or_else(|| "unavailable".to_string());
+                        // Read memory usage (cross-platform)
+                        let memory_kb = read_memory_kb();
 
                         info!(
                             tracked_options = t_count,
                             connections = conn_count,
                             channel_counts = ?channel_counts,
-                            memory_kb = memory_info,
-                            "periodic metrics"
+                            memory_kb = memory_kb,
+                            // Cumulative counters
+                            deribit_received = snapshot.deribit_sub_received,
+                            deribit_enqueued = snapshot.deribit_sub_enqueued,
+                            deribit_dropped = snapshot.deribit_sub_dropped,
+                            mqtt_published = snapshot.mqtt_published,
+                            mqtt_failed = snapshot.mqtt_publish_failed,
+                            // Per-second rates (over last 60s window)
+                            deribit_recv_per_sec = format_rate(rates.deribit_sub_received_per_sec),
+                            deribit_enq_per_sec = format_rate(rates.deribit_sub_enqueued_per_sec),
+                            deribit_drop_per_sec = format_rate(rates.deribit_sub_dropped_per_sec),
+                            mqtt_pub_per_sec = format_rate(rates.mqtt_published_per_sec),
+                            "periodic metrics (1m)"
                         );
                     }
                 }
@@ -254,4 +261,49 @@ impl Runner for SubscriptionManager {
         info!("subscription manager done");
         Ok(())
     }
+}
+
+// ─── Helper functions ─────────────────────────────────────────────
+
+/// Read current process memory usage in KB. Cross-platform:
+/// - Linux: reads VmRSS from /proc/self/status
+/// - macOS: uses `task_info` via libc
+fn read_memory_kb() -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|content| {
+                content
+                    .lines()
+                    .find(|line| line.starts_with("VmRSS:"))
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .and_then(|s| s.parse::<u64>().ok())
+            })
+            .unwrap_or(0)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Use `ps` to get RSS on macOS (no libc dependency needed)
+        use std::process::Command;
+        let pid = std::process::id();
+        Command::new("ps")
+            .args(["-o", "rss=", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        0 // Unsupported platform
+    }
+}
+
+/// Format a f64 rate to a compact string with 1 decimal place.
+fn format_rate(rate: f64) -> String {
+    format!("{:.1}", rate)
 }

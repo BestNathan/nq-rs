@@ -40,12 +40,17 @@ impl Runner for App {
                         Ok(data) => {
                             trace!("recv subscription data: {:?}", data);
 
-                            self.mqtt_async_client.publish(
+                            if let Err(e) = self.mqtt_async_client.publish(
                                 topic.clone(),
                                 QoS::AtLeastOnce,
                                 true,
                                 data,
-                            ).await?;
+                            ).await {
+                                nq_deribit::metrics::MQTT_PUBLISH_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                warn!(error = ?e, "mqtt publish failed");
+                            } else {
+                                nq_deribit::metrics::MQTT_PUBLISHED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
                         },
                         Err(_) => {
                             info!("no more subscription messages");

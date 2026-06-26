@@ -428,18 +428,21 @@ impl Connection {
                                     let _ = el_payload_tx.send_async(test_payload).await;
                                 }
                                 "subscription" => {
+                                    crate::metrics::DERIBIT_SUB_RECEIVED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                     // Use try_send to avoid blocking the WS reader when channel is full.
                                     // If we block here, the WS library's internal buffers grow unboundedly,
                                     // causing OOM. Dropping messages is preferable — the next ticker update
                                     // will arrive shortly and replace the dropped one.
                                     match self.subscription_tx.try_send(text) {
-                                        Ok(_) => {}
+                                        Ok(_) => {
+                                            crate::metrics::DERIBIT_SUB_ENQUEUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                        }
                                         Err(flume::TrySendError::Full(_)) => {
-                                            // Rate-limit this warning to avoid log spam
-                                            // (only log occasionally when channel is full)
+                                            crate::metrics::DERIBIT_SUB_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                             warn!(connection_id = self.id, "subscription channel full, dropping ticker message");
                                         }
                                         Err(flume::TrySendError::Disconnected(_)) => {
+                                            crate::metrics::DERIBIT_SUB_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                             warn!(connection_id = self.id, "subscription rx disconnected");
                                         }
                                     }
