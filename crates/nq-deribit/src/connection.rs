@@ -38,9 +38,13 @@ pub struct Connection {
 
 impl Connection {
     pub fn new(id: usize, config: ConnectionConfig) -> Self {
-        let (subscription_tx, subscription_rx) = flume::unbounded::<String>();
-        let (message_tx, message_rx) = flume::unbounded::<String>();
-        let (responser_tx, responser_rx) = flume::unbounded::<(i64, oneshot::Sender<String>)>();
+        // Use bounded channels to provide backpressure and prevent OOM
+        let sub_cap = config.subscription_channel_capacity;
+        let (subscription_tx, subscription_rx) = flume::bounded::<String>(sub_cap);
+        let msg_cap = config.message_channel_capacity;
+        let (message_tx, message_rx) = flume::bounded::<String>(msg_cap);
+        let resp_cap = config.responser_channel_capacity;
+        let (responser_tx, responser_rx) = flume::bounded::<(i64, oneshot::Sender<String>)>(resp_cap);
 
         Self {
             id,
@@ -230,8 +234,9 @@ impl Connection {
     pub async fn eventloop(&self, ct: CancellationToken) -> Result<()> {
         debug!(connection_id = self.id, "connection eventloop begin");
 
-        let (el_payload_tx, el_payload_rx) = flume::unbounded::<String>();
-        let (el_responser_tx, el_responser_rx) = flume::unbounded::<(i64, oneshot::Sender<String>)>();
+        // Bounded channels for per-reconnect eventloop communication
+        let (el_payload_tx, el_payload_rx) = flume::bounded::<String>(100);
+        let (el_responser_tx, el_responser_rx) = flume::bounded::<(i64, oneshot::Sender<String>)>(100);
 
         loop {
             if ct.is_cancelled() {
@@ -449,4 +454,14 @@ pub struct ConnectionConfig {
     pub client_id: Option<String>,
     #[builder(default)]
     pub client_secret: Option<String>,
+    /// Capacity of the subscription message channel (Deribit → consumer).
+    /// When full, the WS reader blocks, providing natural backpressure.
+    #[builder(default = "10000")]
+    pub subscription_channel_capacity: usize,
+    /// Capacity of the outgoing message channel (producer → WS writer).
+    #[builder(default = "1000")]
+    pub message_channel_capacity: usize,
+    /// Capacity of the API response routing channel.
+    #[builder(default = "1000")]
+    pub responser_channel_capacity: usize,
 }

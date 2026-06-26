@@ -326,6 +326,16 @@ pub struct Config {
     pub client_id: Option<String>,
     #[builder(default)]
     pub client_secret: Option<String>,
+    /// Capacity of the subscription message channel (Deribit → consumer).
+    /// When full, the WS reader blocks, providing natural backpressure.
+    #[builder(default = "10000")]
+    pub subscription_channel_capacity: usize,
+    /// Capacity of the outgoing message channel (producer → WS writer).
+    #[builder(default = "1000")]
+    pub message_channel_capacity: usize,
+    /// Capacity of the API response routing channel.
+    #[builder(default = "1000")]
+    pub responser_channel_capacity: usize,
 }
 
 pub struct ClientBuilder {
@@ -334,12 +344,13 @@ pub struct ClientBuilder {
 
 impl ClientBuilder {
     pub fn build(self) -> Result<Client> {
-        let (subscription_tx, subscription_rx) = flume::unbounded::<String>();
-        let (message_tx, message_rx) = flume::unbounded::<String>();
-        let (responser_tx, responser_rx) = flume::unbounded::<(i64, oneshot::Sender<String>)>();
+        let cfg = self.config.into_inner();
+        let (subscription_tx, subscription_rx) = flume::bounded::<String>(cfg.subscription_channel_capacity);
+        let (message_tx, message_rx) = flume::bounded::<String>(cfg.message_channel_capacity);
+        let (responser_tx, responser_rx) = flume::bounded::<(i64, oneshot::Sender<String>)>(cfg.responser_channel_capacity);
 
         Ok(Client {
-            config: Arc::new(self.config.into_inner()),
+            config: Arc::new(cfg),
             token: Arc::new(RwLock::new(None)),
             subscription_rx,
             subscription_tx,

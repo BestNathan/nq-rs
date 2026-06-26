@@ -57,14 +57,17 @@ impl ConnectionPool {
         if channels.is_empty() {
             return Ok(());
         }
-        let conn = {
-            let conns = self.connections.read().unwrap();
-            conns.iter()
-                .min_by_key(|c| c.channel_count())
-                .unwrap()
-                .clone()
-        };
-        conn.unsubscribe(channels).await
+        // Route unsubscribe to the connection(s) that actually have these channels
+        let conns = self.connections.read().unwrap().clone();
+        for channel in &channels {
+            for conn in &conns {
+                if conn.subscribed_channels().contains(channel) {
+                    conn.unsubscribe(vec![channel.clone()]).await?;
+                    break; // Found the connection, move to next channel
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn subscription_stream(&self) -> impl Stream<Item = String> {
@@ -88,6 +91,25 @@ impl ConnectionPool {
 
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel_token.clone()
+    }
+
+    /// Remove empty connections from the pool (those with zero channels).
+    /// Keeps at least one connection alive.
+    pub fn cleanup_empty_connections(&self) {
+        let mut conns = self.connections.write().unwrap();
+        if conns.len() <= 1 {
+            return;
+        }
+        let before = conns.len();
+        conns.retain(|c| c.channel_count() > 0);
+        let removed = before - conns.len();
+        if removed > 0 {
+            tracing::info!(removed, remaining = conns.len(), "cleaned up empty connections");
+        }
+    }
+
+    pub fn connection_count(&self) -> usize {
+        self.connections.read().unwrap().len()
     }
 
     fn find_or_create_connection(&self) -> Arc<Connection> {

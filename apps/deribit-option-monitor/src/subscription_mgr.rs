@@ -102,26 +102,61 @@ impl Runner for SubscriptionManager {
                 select! {
                     _ = ct1.cancelled() => break,
                     _ = sleep(Duration::from_secs(poll_secs)) => {
-                        // Poll for new options — only subscribe the diff
+                        // Poll for all active options and compute bidirectional diff
                         match fetcher1.fetch_all_options(&currencies1).await {
                             Ok(options) => {
-                                let names: Vec<String> = options.iter().map(|o| o.instrument_name.clone()).collect();
-                                let new: Vec<String> = {
-                                    let t = tracked1.read().unwrap();
-                                    names.iter().filter(|n| !t.contains(*n)).cloned().collect()
+                                let active_names: HashSet<String> = options
+                                    .iter()
+                                    .map(|o| o.instrument_name.clone())
+                                    .collect();
+
+                                // Compute additions and removals under a single write lock
+                                let (new_opts, expired_opts): (Vec<String>, Vec<String>) = {
+                                    let mut t = tracked1.write().unwrap();
+                                    let new: Vec<String> = active_names
+                                        .iter()
+                                        .filter(|n| !t.contains(*n))
+                                        .cloned()
+                                        .collect();
+                                    let expired: Vec<String> = t
+                                        .iter()
+                                        .filter(|n| !active_names.contains(*n))
+                                        .cloned()
+                                        .collect();
+                                    // Update tracked set: add new, remove expired
+                                    t.extend(new.iter().cloned());
+                                    for e in &expired {
+                                        t.remove(e);
+                                    }
+                                    (new, expired)
                                 };
-                                if !new.is_empty() {
-                                    let channels: Vec<String> = new.iter()
+
+                                // Subscribe to new options
+                                if !new_opts.is_empty() {
+                                    let channels: Vec<String> = new_opts.iter()
                                         .map(|n| format!("ticker.{}.{}", n, interval))
                                         .collect();
-                                    info!(count = channels.len(), total = names.len(), "poll discovered new options");
+                                    info!(count = channels.len(), total = active_names.len(), "poll discovered new options");
                                     if let Err(e) = pool1.subscribe(channels).await {
                                         warn!(error = ?e, "poll subscribe failed");
                                     }
-                                    let mut t = tracked1.write().unwrap();
-                                    t.extend(new);
-                                } else {
-                                    debug!(total = names.len(), "poll: no new options");
+                                }
+
+                                // Unsubscribe from expired options
+                                if !expired_opts.is_empty() {
+                                    let channels: Vec<String> = expired_opts.iter()
+                                        .map(|n| format!("ticker.{}.{}", n, interval))
+                                        .collect();
+                                    info!(count = channels.len(), remaining = active_names.len(), "poll removing expired options");
+                                    if let Err(e) = pool1.unsubscribe(channels).await {
+                                        warn!(error = ?e, "poll unsubscribe failed");
+                                    }
+                                    // Clean up empty connections to free resources
+                                    pool1.cleanup_empty_connections();
+                                }
+
+                                if new_opts.is_empty() && expired_opts.is_empty() {
+                                    debug!(total = active_names.len(), "poll: no changes");
                                 }
                             }
                             Err(e) => {
@@ -154,9 +189,10 @@ impl Runner for SubscriptionManager {
                             if let SubscriptionParams::Subscribe(params) = sub_msg.params {
                                 if params.channel.starts_with("instrument_state.") {
                                     if let Ok(state_data) = serde_json::from_value::<InstrumentStateData>(params.data) {
+                                        // Use write lock directly to avoid TOCTOU race
                                         let should_subscribe = {
-                                            let t = tracked2.read().unwrap();
-                                            !t.contains(&state_data.instrument_name)
+                                            let mut t = tracked2.write().unwrap();
+                                            t.insert(state_data.instrument_name.clone())
                                         };
                                         if should_subscribe {
                                             let channel = format!("ticker.{}.{}", state_data.instrument_name, interval2);
@@ -164,8 +200,6 @@ impl Runner for SubscriptionManager {
                                             if let Err(e) = pool2.subscribe(vec![channel]).await {
                                                 warn!(error = ?e, "instrument_state subscribe failed");
                                             }
-                                            let mut t = tracked2.write().unwrap();
-                                            t.insert(state_data.instrument_name);
                                         }
                                     }
                                 }
@@ -175,6 +209,31 @@ impl Runner for SubscriptionManager {
                 }
             }
             debug!("instrument state loop done");
+        });
+
+        // Task 3: Periodic metrics logging
+        let ct3 = ct.clone();
+        let tracked3 = tracked.clone();
+        let pool3 = pool.clone();
+        tokio::spawn(async move {
+            loop {
+                select! {
+                    _ = ct3.cancelled() => break,
+                    _ = sleep(Duration::from_secs(300)) => {
+                        let t_count = tracked3.read().unwrap().len();
+                        let conn_count = pool3.connection_count();
+                        let conns = pool3.connection_runners();
+                        let channel_counts: Vec<usize> = conns.iter().map(|c| c.channel_count()).collect();
+                        info!(
+                            tracked_options = t_count,
+                            connections = conn_count,
+                            channel_counts = ?channel_counts,
+                            "periodic metrics"
+                        );
+                    }
+                }
+            }
+            debug!("metrics loop done");
         });
 
         ct.cancelled().await;
