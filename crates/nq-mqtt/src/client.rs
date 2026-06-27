@@ -122,7 +122,7 @@ impl ClientBuilder {
 
         option.set_max_packet_size(1024 * 1024, 1024 * 1024);
 
-        let (client, eventloop) = AsyncClient::new(option, 10);
+        let (client, eventloop) = AsyncClient::new(option, 1000);
 
         Client::new(client, eventloop)
     }
