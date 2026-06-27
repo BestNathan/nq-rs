@@ -7,7 +7,7 @@ const DEFAULT_CURRENCIES: &str = "BTC,ETH";
 const DEFAULT_TICKER_INTERVAL: &str = "agg2";
 const DEFAULT_MQTT_TOPIC_PREFIX: &str = "t/deribit/option_ticker";
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 300;
-const DEFAULT_POOL_CAPACITY: usize = 200;
+const DEFAULT_POOL_CAPACITY: usize = 300;
 
 pub struct AppConfig {
     pub currencies: Vec<Currency>,
