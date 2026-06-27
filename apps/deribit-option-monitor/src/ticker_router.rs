@@ -75,16 +75,29 @@ impl Runner for TickerRouter {
                             }
                         };
 
-                        if let Err(e) = self.mqtt_client.publish(
-                            &topic,
-                            QoS::AtLeastOnce,
-                            false,
-                            payload,
+                        // Use timeout to prevent TickerRouter from blocking forever
+                        // when the MQTT client is disconnected. Without this, the router
+                        // stalls, the subscription channel fills, and OOM follows.
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            self.mqtt_client.publish(
+                                &topic,
+                                QoS::AtLeastOnce,
+                                false,
+                                payload,
+                            )
                         ).await {
-                            metrics::MQTT_PUBLISH_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            warn!(error = ?e, topic = topic, "mqtt publish failed");
-                        } else {
-                            metrics::MQTT_PUBLISHED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            Ok(Ok(())) => {
+                                metrics::MQTT_PUBLISHED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            Ok(Err(e)) => {
+                                metrics::MQTT_PUBLISH_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                warn!(error = ?e, topic = topic, "mqtt publish failed");
+                            }
+                            Err(_timeout) => {
+                                metrics::MQTT_PUBLISH_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                // Don't warn on every timeout — would flood logs at ~150 msg/s
+                            }
                         }
                     }
                 }
