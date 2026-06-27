@@ -141,3 +141,60 @@ impl ConnectionPool {
         conn
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::ConnectionConfigBuilder;
+
+    fn test_config() -> ConnectionConfig {
+        ConnectionConfigBuilder::default()
+            .request_timeout(1) // 1s timeout since no WS eventloop in unit tests
+            .build()
+            .unwrap()
+    }
+
+    /// Verify that subscribe() distributes channels across multiple connections
+    /// when the count exceeds capacity_per_connection.
+    #[tokio::test]
+    async fn test_subscribe_distributes_across_connections() {
+        let pool = ConnectionPool::new(PoolConfig {
+            capacity_per_connection: 3,
+            connection_config: test_config(),
+        });
+
+        // Subscribe 10 channels — should need ceil(10/3) = 4 connections
+        let channels: Vec<String> = (0..10).map(|i| format!("channel_{}", i)).collect();
+
+        // Note: subscribe() will fail because there's no real WebSocket eventloop
+        // running. We just verify the distribution happened by checking connection
+        // channel counts after the attempt.
+        let _ = pool.subscribe(channels).await;
+
+        let conns = pool.connection_runners();
+
+        // Should have created 4 connections (10 / 3 = 3 full + 1 partial)
+        assert_eq!(conns.len(), 4, "should create 4 connections for 10 channels with cap 3");
+
+        // Channel counts should be [3, 3, 3, 1]
+        let counts: Vec<usize> = conns.iter().map(|c| c.channel_count()).collect();
+        assert_eq!(counts.iter().sum::<usize>(), 10, "all 10 channels should be tracked");
+        assert!(counts.iter().all(|&c| c <= 3), "no connection should exceed capacity");
+    }
+
+    /// Single connection should handle channels within capacity.
+    #[tokio::test]
+    async fn test_subscribe_single_connection_within_capacity() {
+        let pool = ConnectionPool::new(PoolConfig {
+            capacity_per_connection: 100,
+            connection_config: test_config(),
+        });
+
+        let channels: Vec<String> = (0..5).map(|i| format!("ch_{}", i)).collect();
+        let _ = pool.subscribe(channels).await;
+
+        let conns = pool.connection_runners();
+        assert_eq!(conns.len(), 1, "should use only 1 connection when within capacity");
+        assert_eq!(conns[0].channel_count(), 5);
+    }
+}
