@@ -42,7 +42,7 @@ spec:
             - name: DERIBIT_OPTION_TICKER_INTERVAL
               value: agg2
             - name: DERIBIT_OPTION_POOL_CAPACITY
-              value: "300"
+              value: "500"
           resources:
             requests:
               memory: "128Mi"
