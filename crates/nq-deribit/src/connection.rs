@@ -329,7 +329,7 @@ impl Connection {
                             Err(_) => warn!(connection_id = conn_id, "heartbeat set_heartbeat timed out (non-fatal)"),
                         }
 
-                        // 2. Auth if configured
+                        // 2. Auth if configured (non-fatal: public subscriptions work without it)
                         if let (Some(id), Some(secret)) = (&client_id, &client_secret) {
                             let auth_id = 800_000 + conn_id as i64;
                             let mut auth_val = serde_json::to_value(&AuthRequest::credential_auth(id, secret))?;
@@ -340,10 +340,17 @@ impl Connection {
                             let (tx, rx) = oneshot::channel();
                             el_payload_tx.send_async(auth_val.to_string()).await?;
                             el_responser_tx.send_async((auth_id, tx)).await?;
-                            let resp = tokio::time::timeout(Duration::from_secs(60), rx).await??;
-                            let result: JSONRPCResponse<crate::request::authentication::AuthResponse> = serde_json::from_str(&resp)?;
-                            if let either::Either::Left(auth_resp) = result.result {
-                                *token.write().unwrap() = auth_resp.access_token;
+                            match tokio::time::timeout(Duration::from_secs(10), rx).await {
+                                Ok(Ok(resp)) => {
+                                    if let Ok(result) = serde_json::from_str::<JSONRPCResponse<crate::request::authentication::AuthResponse>>(&resp) {
+                                        if let either::Either::Left(auth_resp) = result.result {
+                                            *token.write().unwrap() = auth_resp.access_token;
+                                            info!(connection_id = conn_id, "authenticated");
+                                        }
+                                    }
+                                }
+                                Ok(Err(_)) => warn!(connection_id = conn_id, "auth channel closed (non-fatal)"),
+                                Err(_) => warn!(connection_id = conn_id, "auth timed out (non-fatal)"),
                             }
                         }
 
