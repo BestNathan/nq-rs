@@ -359,7 +359,11 @@ impl Connection {
                         Ok::<(), anyhow::Error>(())
                     }.await;
                     if let Err(e) = res {
-                        warn!(connection_id = conn_id, error = ?e, "setup task failed, will retry on next reconnect");
+                        warn!(connection_id = conn_id, error = ?e, "setup task failed, triggering reconnect");
+                        // Signal the eventloop to break and reconnect with a fresh WS.
+                        // Without this, the connection limps along without heartbeat/auth
+                        // and eventually Deribit closes it without recovery.
+                        let _ = err_tx.send_async(e).await;
                     }
                 });
             }
