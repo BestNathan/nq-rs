@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use anyhow::Result;
 use nq_app::runner::Runner;
@@ -225,10 +226,13 @@ impl ConnectionPool {
         }
         info!(connection_id = id, "pool created and spawning new connection");
 
-        // Auto-spawn eventloop for the new connection
+        // Auto-spawn eventloop with a per-connection stagger to avoid
+        // overwhelming the proxy with simultaneous WS handshakes.
         let ct = self.cancel_token.clone();
         let conn_clone = conn.clone();
+        let delay = Duration::from_secs(id as u64);
         tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
             let _ = conn_clone.run(ct).await;
         });
 
