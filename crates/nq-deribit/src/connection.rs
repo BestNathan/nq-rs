@@ -68,6 +68,14 @@ impl Connection {
         self.channels.read().unwrap().len()
     }
 
+    /// Synchronously add channels to the tracked set without making API calls.
+    /// Used by ConnectionPool to pre-track assignments so the distribution loop
+    /// sees accurate counts immediately.
+    pub fn pre_track_channels(&self, channels: &[String]) {
+        let mut set = self.channels.write().unwrap();
+        set.extend(channels.iter().cloned());
+    }
+
     pub fn subscribed_channels(&self) -> HashSet<String> {
         self.channels.read().unwrap().clone()
     }

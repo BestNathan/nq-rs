@@ -42,19 +42,14 @@ impl ConnectionPool {
 
         let mut remaining = channels.as_slice();
         let mut handles = Vec::new();
-        // Track planned assignments per connection so the distribution loop
-        // makes accurate decisions without waiting for spawned tasks.
-        let mut planned: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
 
         while !remaining.is_empty() {
-            // Find a connection with capacity, accounting for planned assignments
+            // Find a connection with spare capacity
             let conn = {
                 let conns = self.connections.read().unwrap();
                 let mut found = None;
                 for c in conns.iter() {
-                    let current = c.channel_count();
-                    let reserved = planned.get(&c.id()).copied().unwrap_or(0);
-                    if current + reserved < self.capacity {
+                    if c.channel_count() < self.capacity {
                         found = Some(c.clone());
                         break;
                     }
@@ -66,14 +61,17 @@ impl ConnectionPool {
                 }
             };
 
-            let current_count = conn.channel_count();
-            let already_planned = planned.get(&conn.id()).copied().unwrap_or(0);
-            let available = self.capacity.saturating_sub(current_count + already_planned);
+            let current = conn.channel_count();
+            let available = self.capacity.saturating_sub(current);
             let take_n = remaining.len().min(available.max(1));
 
             let batch = remaining[..take_n].to_vec();
             remaining = &remaining[take_n..];
-            *planned.entry(conn.id()).or_insert(0) += take_n;
+
+            // Synchronously pre-track channels so the NEXT iteration of this
+            // while loop sees the updated channel_count() immediately — no
+            // async race, no HashMap, no yield_now.
+            conn.pre_track_channels(&batch);
 
             let conn = conn.clone();
             handles.push(tokio::spawn(async move {
