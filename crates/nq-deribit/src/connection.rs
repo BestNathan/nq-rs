@@ -311,7 +311,8 @@ impl Connection {
 
                 tokio::spawn(async move {
                     let res = async {
-                        // 1. Set heartbeat
+                        // 1. Set heartbeat (non-fatal: Deribit subscription data still
+                        //    flows even if set_heartbeat fails or times out)
                         let hb_id = 900_000 + conn_id as i64;
                         let hb_payload = json!({
                             "jsonrpc": "2.0",
@@ -322,7 +323,11 @@ impl Connection {
                         let (tx, rx) = oneshot::channel();
                         el_payload_tx.send_async(hb_payload).await?;
                         el_responser_tx.send_async((hb_id, tx)).await?;
-                        let _ = tokio::time::timeout(Duration::from_secs(60), rx).await?;
+                        match tokio::time::timeout(Duration::from_secs(10), rx).await {
+                            Ok(Ok(_)) => debug!(connection_id = conn_id, "heartbeat set"),
+                            Ok(Err(_)) => warn!(connection_id = conn_id, "heartbeat channel closed"),
+                            Err(_) => warn!(connection_id = conn_id, "heartbeat set_heartbeat timed out (non-fatal)"),
+                        }
 
                         // 2. Auth if configured
                         if let (Some(id), Some(secret)) = (&client_id, &client_secret) {
