@@ -260,6 +260,10 @@ impl Connection {
         let mut backoff_secs: u64 = 1;
         const MAX_BACKOFF_SECS: u64 = 60;
 
+        // Per-connection random seed for jitter, to prevent all connections
+        // from reconnecting simultaneously (thundering herd).
+        let jitter_seed: u64 = (self.id as u64).wrapping_mul(1_000_000);
+
         loop {
             if ct.is_cancelled() {
                 return Ok(());
@@ -273,10 +277,15 @@ impl Connection {
                         break ws;
                     }
                     Err(e) => {
-                        warn!(connection_id = self.id, error = ?e, backoff_secs,
+                        // Add ±25% jitter to spread out reconnect attempts
+                        let jitter = (backoff_secs as f64 * 0.25) as u64;
+                        let jittered = backoff_secs.saturating_sub(jitter)
+                            + ((jitter_seed.wrapping_add(backoff_secs)) % (jitter * 2 + 1));
+                        let delay = jittered.max(1);
+                        warn!(connection_id = self.id, error = ?e, backoff_secs, delay,
                             "websocket connect failed, retrying after backoff");
                         select! {
-                            _ = tokio::time::sleep(Duration::from_secs(backoff_secs)) => {}
+                            _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
                             _ = ct.cancelled() => return Ok(()),
                         }
                         backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
