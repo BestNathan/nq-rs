@@ -89,7 +89,10 @@ impl Connection {
             set.extend(channels.iter().cloned());
         }
 
-        // Batch subscribe in chunks to avoid oversized WS messages
+        // Batch subscribe in chunks to avoid oversized WS messages.
+        // Channels are already in the tracked set, so any that fail here will be
+        // picked up by reconnect/resubscribe. Stop on first error to avoid wasting
+        // time on a broken connection (each timeout is 60s).
         const BATCH_SIZE: usize = 100;
         let total = channels.len();
         let mut done = 0usize;
@@ -102,7 +105,8 @@ impl Connection {
                 }
                 Err(e) => {
                     warn!(connection_id = self.id, error = ?e, batch_size = chunk.len(),
-                        "subscribe batch failed, channels will retry on reconnect");
+                        "subscribe batch failed, remaining {} channels will retry on reconnect", total - done);
+                    break; // stop trying — WS is down, reconnect will resubscribe
                 }
             }
         }
