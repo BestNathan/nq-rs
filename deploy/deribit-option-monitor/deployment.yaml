@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: option-monitor
-          image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-982f2da
+          image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-875a69e
           imagePullPolicy: Always
           env:
             - name: RUST_LOG
