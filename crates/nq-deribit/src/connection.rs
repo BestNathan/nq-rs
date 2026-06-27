@@ -28,8 +28,7 @@ pub struct Connection {
     channels: Arc<RwLock<HashSet<String>>>,
     config: Arc<ConnectionConfig>,
     token: Arc<RwLock<Option<String>>>,
-    subscription_tx: Sender<String>,
-    subscription_rx: Receiver<String>,
+    subscription_broadcast_tx: std::sync::OnceLock<tokio::sync::broadcast::Sender<String>>,
     message_tx: Sender<String>,
     message_rx: Receiver<String>,
     responser_tx: Sender<(i64, oneshot::Sender<String>)>,
@@ -38,9 +37,7 @@ pub struct Connection {
 
 impl Connection {
     pub fn new(id: usize, config: ConnectionConfig) -> Self {
-        // Use bounded channels to provide backpressure and prevent OOM
-        let sub_cap = config.subscription_channel_capacity;
-        let (subscription_tx, subscription_rx) = flume::bounded::<String>(sub_cap);
+        // Use bounded channels for outgoing message and API response routing
         let msg_cap = config.message_channel_capacity;
         let (message_tx, message_rx) = flume::bounded::<String>(msg_cap);
         let resp_cap = config.responser_channel_capacity;
@@ -51,8 +48,7 @@ impl Connection {
             channels: Arc::new(RwLock::new(HashSet::new())),
             config: Arc::new(config),
             token: Arc::new(RwLock::new(None)),
-            subscription_tx,
-            subscription_rx,
+            subscription_broadcast_tx: std::sync::OnceLock::new(),
             message_tx,
             message_rx,
             responser_tx,
@@ -80,8 +76,10 @@ impl Connection {
         self.channels.read().unwrap().clone()
     }
 
-    pub fn subscription_rx(&self) -> Receiver<String> {
-        self.subscription_rx.clone()
+    /// Set the pool-level broadcast sender. Called once during connection creation.
+    /// Subsequent calls are silently ignored (OnceLock).
+    pub fn set_broadcast_tx(&self, tx: tokio::sync::broadcast::Sender<String>) {
+        let _ = self.subscription_broadcast_tx.set(tx);
     }
 
     /// Subscribe to new channels dynamically. Channels are added to the live set
@@ -476,21 +474,19 @@ impl Connection {
                                 }
                                 "subscription" => {
                                     crate::metrics::DERIBIT_SUB_RECEIVED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    // Use try_send to avoid blocking the WS reader when channel is full.
-                                    // If we block here, the WS library's internal buffers grow unboundedly,
-                                    // causing OOM. Dropping messages is preferable — the next ticker update
-                                    // will arrive shortly and replace the dropped one.
-                                    match self.subscription_tx.try_send(text) {
-                                        Ok(_) => {
-                                            crate::metrics::DERIBIT_SUB_ENQUEUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                        }
-                                        Err(flume::TrySendError::Full(_)) => {
-                                            crate::metrics::DERIBIT_SUB_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                            warn!(connection_id = self.id, "subscription channel full, dropping ticker message");
-                                        }
-                                        Err(flume::TrySendError::Disconnected(_)) => {
-                                            crate::metrics::DERIBIT_SUB_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                            warn!(connection_id = self.id, "subscription rx disconnected");
+                                    // Broadcast send is non-blocking: when the ring buffer is full,
+                                    // the oldest message is evicted to make room. This never
+                                    // blocks the WS reader and prevents OOM.
+                                    // SendError only occurs when there are zero receivers,
+                                    // which is a transient startup state.
+                                    if let Some(tx) = self.subscription_broadcast_tx.get() {
+                                        match tx.send(text) {
+                                            Ok(_) => {
+                                                crate::metrics::DERIBIT_SUB_ENQUEUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                            }
+                                            Err(_) => {
+                                                crate::metrics::DERIBIT_SUB_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                            }
                                         }
                                     }
                                 }
@@ -533,11 +529,6 @@ pub struct ConnectionConfig {
     pub client_id: Option<String>,
     #[builder(default)]
     pub client_secret: Option<String>,
-    /// Capacity of the subscription message channel (Deribit → consumer).
-    /// When full, messages are dropped (via try_send) to avoid blocking the WS reader,
-    /// which would cause the WS library's internal buffers to grow unboundedly.
-    #[builder(default = "50000")]
-    pub subscription_channel_capacity: usize,
     /// Capacity of the outgoing message channel (producer → WS writer).
     #[builder(default = "1000")]
     pub message_channel_capacity: usize,

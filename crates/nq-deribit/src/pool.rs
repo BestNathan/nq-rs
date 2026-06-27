@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
-use futures_util::Stream;
 use nq_app::runner::Runner;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -15,6 +14,7 @@ pub struct ConnectionPool {
     next_id: AtomicUsize,
     base_config: ConnectionConfig,
     cancel_token: CancellationToken,
+    broadcast_tx: tokio::sync::broadcast::Sender<String>,
 }
 
 pub struct PoolConfig {
@@ -25,13 +25,16 @@ pub struct PoolConfig {
 impl ConnectionPool {
     pub fn new(config: PoolConfig) -> Self {
         let cancel_token = CancellationToken::new();
+        let (broadcast_tx, _) = tokio::sync::broadcast::channel(50000);
         let first = Arc::new(Connection::new(0, config.connection_config.clone()));
+        first.set_broadcast_tx(broadcast_tx.clone());
         Self {
             connections: Arc::new(RwLock::new(vec![first])),
             capacity: config.capacity_per_connection,
             next_id: AtomicUsize::new(1),
             base_config: config.connection_config,
             cancel_token,
+            broadcast_tx,
         }
     }
 
@@ -113,12 +116,10 @@ impl ConnectionPool {
         Ok(())
     }
 
-    pub fn subscription_stream(&self) -> impl Stream<Item = String> {
-        let conns = self.connections.read().unwrap();
-        let streams: Vec<_> = conns.iter()
-            .map(|c| c.subscription_rx().into_stream())
-            .collect();
-        futures_util::stream::select_all(streams)
+    /// Subscribe to the pool-level broadcast channel for subscription messages.
+    /// Each caller gets its own receiver and sees all messages independently.
+    pub fn subscribe_to_broadcast(&self) -> tokio::sync::broadcast::Receiver<String> {
+        self.broadcast_tx.subscribe()
     }
 
     /// Returns a snapshot of all connections. Call once at startup if you want
@@ -158,6 +159,7 @@ impl ConnectionPool {
     fn create_connection(&self) -> Arc<Connection> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let conn = Arc::new(Connection::new(id, self.base_config.clone()));
+        conn.set_broadcast_tx(self.broadcast_tx.clone());
         {
             let mut conns = self.connections.write().unwrap();
             conns.push(conn.clone());

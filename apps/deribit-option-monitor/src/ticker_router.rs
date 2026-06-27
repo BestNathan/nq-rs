@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use nq_app::runner::Runner;
 use nq_deribit::message::{SubscriptionMessage, SubscriptionParams};
 use nq_deribit::metrics;
@@ -34,17 +33,21 @@ impl Runner for TickerRouter {
     async fn run(&self, ct: CancellationToken) -> Result<()> {
         debug!("ticker router is running");
 
-        let mut stream = self.pool.subscription_stream();
+        let mut rx = self.pool.subscribe_to_broadcast();
 
         loop {
             select! {
                 _ = ct.cancelled() => break,
-                msg = stream.next() => {
-                    let msg = match msg {
-                        Some(m) => m,
-                        None => {
-                            debug!("ticker router: subscription stream ended");
+                result = rx.recv() => {
+                    let msg = match result {
+                        Ok(m) => m,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            debug!("ticker router: broadcast channel closed");
                             break;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(skipped = n, "ticker router: lagged behind broadcast");
+                            continue;
                         }
                     };
 

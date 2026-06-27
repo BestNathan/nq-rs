@@ -174,16 +174,22 @@ impl Runner for SubscriptionManager {
         let tracked2 = tracked.clone();
         let pool2 = pool.clone();
         let interval2 = interval;
-        let conn = pool.first_connection();
-        let sub_rx = conn.subscription_rx();
+        let mut sub_rx = pool.subscribe_to_broadcast();
         tokio::spawn(async move {
             loop {
                 select! {
                     _ = ct2.cancelled() => break,
-                    msg = sub_rx.recv_async() => {
-                        let msg = match msg {
+                    result = sub_rx.recv() => {
+                        let msg = match result {
                             Ok(m) => m,
-                            Err(_) => break,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                debug!("instrument state: broadcast channel closed");
+                                break;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                warn!(skipped = n, "instrument state: lagged behind broadcast");
+                                continue;
+                            }
                         };
                         if let Ok(sub_msg) = serde_json::from_str::<SubscriptionMessage>(&msg) {
                             if let SubscriptionParams::Subscribe(params) = sub_msg.params {

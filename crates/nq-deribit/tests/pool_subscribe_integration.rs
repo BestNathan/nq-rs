@@ -22,7 +22,6 @@ fn test_pool() -> anyhow::Result<ConnectionPool> {
     let conn_config = ConnectionConfigBuilder::default()
         .proxy(Proxy::all("http://192.168.2.98:7892")?)
         .request_timeout(30)
-        .subscription_channel_capacity(50000)
         .build()?;
 
     Ok(ConnectionPool::new(PoolConfig {
@@ -147,20 +146,21 @@ async fn test_pool_subscribe_all_options() -> anyhow::Result<()> {
     );
 
     // ─── Verify data flows ─────────────────────────────────────────
-    // Read from subscription stream for a few seconds to confirm tickers arrive
-    let mut stream = pool.subscription_stream();
+    // Read from broadcast for a few seconds to confirm tickers arrive
+    let mut rx = pool.subscribe_to_broadcast();
     let mut msg_count = 0usize;
     let read_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
 
     while tokio::time::Instant::now() < read_deadline {
-        match timeout(Duration::from_secs(2), futures_util::StreamExt::next(&mut stream)).await {
-            Ok(Some(_msg)) => {
+        match timeout(Duration::from_secs(2), rx.recv()).await {
+            Ok(Ok(_msg)) => {
                 msg_count += 1;
                 if msg_count >= 10 {
                     break; // Enough to prove data flows
                 }
             }
-            Ok(None) => break,
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
             Err(_) => break, // timeout
         }
     }
