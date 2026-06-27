@@ -322,7 +322,7 @@ impl Connection {
                         let (tx, rx) = oneshot::channel();
                         el_payload_tx.send_async(hb_payload).await?;
                         el_responser_tx.send_async((hb_id, tx)).await?;
-                        let _ = tokio::time::timeout(Duration::from_secs(10), rx).await?;
+                        let _ = tokio::time::timeout(Duration::from_secs(30), rx).await?;
 
                         // 2. Auth if configured
                         if let (Some(id), Some(secret)) = (&client_id, &client_secret) {
@@ -335,7 +335,7 @@ impl Connection {
                             let (tx, rx) = oneshot::channel();
                             el_payload_tx.send_async(auth_val.to_string()).await?;
                             el_responser_tx.send_async((auth_id, tx)).await?;
-                            let resp = tokio::time::timeout(Duration::from_secs(10), rx).await??;
+                            let resp = tokio::time::timeout(Duration::from_secs(30), rx).await??;
                             let result: JSONRPCResponse<crate::request::authentication::AuthResponse> = serde_json::from_str(&resp)?;
                             if let either::Either::Left(auth_resp) = result.result {
                                 *token.write().unwrap() = auth_resp.access_token;

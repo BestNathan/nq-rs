@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use nq_app::runner::Runner;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::connection::{Connection, ConnectionConfig};
 
@@ -15,6 +16,8 @@ pub struct ConnectionPool {
     base_config: ConnectionConfig,
     cancel_token: CancellationToken,
     broadcast_tx: tokio::sync::broadcast::Sender<String>,
+    /// Serializes subscribe() calls to prevent concurrent distribution races.
+    subscribe_mutex: tokio::sync::Mutex<()>,
 }
 
 pub struct PoolConfig {
@@ -35,54 +38,110 @@ impl ConnectionPool {
             base_config: config.connection_config,
             cancel_token,
             broadcast_tx,
+            subscribe_mutex: tokio::sync::Mutex::new(()),
         }
     }
 
+    /// Subscribe channels across connections, respecting capacity_per_connection.
+    /// Uses a mutex to prevent concurrent subscribe() calls from racing on
+    /// connection allocation, and a local planned-counts map to guarantee that
+    /// no single connection exceeds capacity regardless of task scheduling.
     pub async fn subscribe(&self, channels: Vec<String>) -> Result<()> {
         if channels.is_empty() {
             return Ok(());
         }
 
+        // Serialize subscribe calls: concurrent calls racing on channel_count()
+        // can cause the first-fit loop to overload a single connection.
+        let _guard = self.subscribe_mutex.lock().await;
+
+        // Phase 1: Distribute channels across connections deterministically
+        // using a local planned-counts map so the allocation is independent of
+        // async task scheduling and HashSet state visibility.
+        let mut planned: HashMap<usize, usize> = HashMap::new(); // connection_id → planned_count
+        let mut assignments: Vec<(Arc<Connection>, Vec<String>)> = Vec::new();
         let mut remaining = channels.as_slice();
-        let mut handles = Vec::new();
 
         while !remaining.is_empty() {
-            // Find a connection with spare capacity
+            // Find or create a connection with spare planned capacity
             let conn = {
                 let conns = self.connections.read().unwrap();
-                let mut found = None;
-                for c in conns.iter() {
-                    if c.channel_count() < self.capacity {
-                        found = Some(c.clone());
-                        break;
-                    }
-                }
-                drop(conns);
+                let found = conns.iter().find(|c| {
+                    let planned = planned.get(&c.id()).copied().unwrap_or(0);
+                    let actual = c.channel_count();
+                    // Use the larger of planned and actual to avoid overallocation
+                    let effective = planned.max(actual);
+                    effective < self.capacity
+                });
                 match found {
-                    Some(c) => c,
-                    None => self.create_connection(),
+                    Some(c) => c.clone(),
+                    None => {
+                        drop(conns);
+                        self.create_connection()
+                    }
                 }
             };
 
-            let current = conn.channel_count();
-            let available = self.capacity.saturating_sub(current);
-            let take_n = remaining.len().min(available.max(1));
+            let conn_id = conn.id();
+            let planned_count = planned.get(&conn_id).copied().unwrap_or(0);
+            let actual_count = conn.channel_count();
+            let effective = planned_count.max(actual_count);
+            let available = self.capacity.saturating_sub(effective);
 
+            if available == 0 {
+                // This shouldn't happen since we checked effective < capacity,
+                // but handle defensively: create a new connection instead.
+                warn!(
+                    connection_id = conn_id,
+                    planned = planned_count,
+                    actual = actual_count,
+                    capacity = self.capacity,
+                    "unexpected: connection has no spare capacity despite check; creating new"
+                );
+                drop(conn);
+                let conn = self.create_connection();
+                let conn_id = conn.id();
+                let available = self.capacity;
+                let take_n = remaining.len().min(available);
+                let batch = remaining[..take_n].to_vec();
+                remaining = &remaining[take_n..];
+                *planned.entry(conn_id).or_insert(0) += take_n;
+                conn.pre_track_channels(&batch);
+                assignments.push((conn, batch));
+                continue;
+            }
+
+            let take_n = remaining.len().min(available);
             let batch = remaining[..take_n].to_vec();
             remaining = &remaining[take_n..];
 
-            // Synchronously pre-track channels so the NEXT iteration of this
-            // while loop sees the updated channel_count() immediately — no
-            // async race, no HashMap, no yield_now.
+            // Track planned count locally BEFORE pre-tracking, so the next
+            // iteration's find() sees the planned allocation regardless of
+            // whether the HashSet write is visible yet.
+            *planned.entry(conn_id).or_insert(0) += take_n;
+
+            // Pre-track synchronously for reconnect resilience
             conn.pre_track_channels(&batch);
 
-            let conn = conn.clone();
+            assignments.push((conn, batch));
+        }
+
+        info!(
+            total_channels = channels.len(),
+            connections_used = planned.len(),
+            distribution = ?planned.iter().map(|(k, v)| (*k, *v)).collect::<Vec<_>>(),
+            "pool subscribe distribution planned"
+        );
+
+        // Phase 2: Spawn subscribe tasks for all assignments
+        let mut handles = Vec::new();
+        for (conn, batch) in assignments {
             handles.push(tokio::spawn(async move {
                 conn.subscribe(batch).await
             }));
         }
 
-        // Await all spawned tasks; first JoinError or subscribe error propagates
+        // Phase 3: Await all spawned tasks; first error propagates
         for h in handles {
             h.await??;
         }
