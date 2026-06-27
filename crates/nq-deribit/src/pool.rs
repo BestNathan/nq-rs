@@ -39,8 +39,35 @@ impl ConnectionPool {
         if channels.is_empty() {
             return Ok(());
         }
-        let conn = self.find_or_create_connection();
-        conn.subscribe(channels).await
+
+        let mut remaining = channels.as_slice();
+        let mut handles = Vec::new();
+
+        while !remaining.is_empty() {
+            let conn = self.find_or_create_connection();
+            let current_count = conn.channel_count();
+            let available = self.capacity.saturating_sub(current_count);
+            // Take at least 1 even if connection appears "full" (race safety)
+            let take_n = remaining.len().min(available.max(1));
+
+            let batch = remaining[..take_n].to_vec();
+            remaining = &remaining[take_n..];
+
+            let conn = conn.clone();
+            handles.push(tokio::spawn(async move {
+                conn.subscribe(batch).await
+            }));
+            // Yield so the spawned task can run and increment channel_count(),
+            // ensuring find_or_create_connection on the next iteration sees
+            // up-to-date capacity.
+            tokio::task::yield_now().await;
+        }
+
+        // Await all spawned tasks; first JoinError or subscribe error propagates
+        for h in handles {
+            h.await??;
+        }
+        Ok(())
     }
 
     /// Re-subscribe all tracked channels on all connections.
