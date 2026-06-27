@@ -254,10 +254,11 @@ impl Connection {
         debug!(connection_id = self.id, "connection eventloop begin");
 
         // Bounded channels for per-reconnect eventloop communication
-        // These handle a small, predictable number of setup messages (heartbeat/auth/subscribe)
-        // so unbounded is safe here — no OOM risk.
         let (el_payload_tx, el_payload_rx) = flume::unbounded::<String>();
         let (el_responser_tx, el_responser_rx) = flume::unbounded::<(i64, oneshot::Sender<String>)>();
+
+        let mut backoff_secs: u64 = 1;
+        const MAX_BACKOFF_SECS: u64 = 60;
 
         loop {
             if ct.is_cancelled() {
@@ -265,9 +266,22 @@ impl Connection {
             }
 
             debug!(connection_id = self.id, "connecting websocket");
-            let mut ws = select! {
-                ws = self.connect_websocket() => ws?,
-                _ = ct.cancelled() => return Ok(()),
+            let mut ws = loop {
+                match self.connect_websocket().await {
+                    Ok(ws) => {
+                        backoff_secs = 1; // reset on success
+                        break ws;
+                    }
+                    Err(e) => {
+                        warn!(connection_id = self.id, error = ?e, backoff_secs,
+                            "websocket connect failed, retrying after backoff");
+                        select! {
+                            _ = tokio::time::sleep(Duration::from_secs(backoff_secs)) => {}
+                            _ = ct.cancelled() => return Ok(()),
+                        }
+                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                    }
+                }
             };
             debug!(connection_id = self.id, "websocket connected");
 
@@ -355,7 +369,8 @@ impl Connection {
                 select! {
                     err = err_rx.recv_async() => {
                         let err = err.with_context(|| "connection setup error")?;
-                        return Err(err);
+                        warn!(connection_id = self.id, error = ?err, "setup failed, reconnecting");
+                        break;
                     }
                     () = ct.cancelled() => {
                         return Ok(());
