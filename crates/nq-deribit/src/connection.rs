@@ -443,6 +443,14 @@ impl Connection {
                     }.await;
                     if let Err(e) = setup_res {
                         warn!(connection_id = self.id, error = ?e, setup_backoff_secs, "setup resubscribe failed, reconnecting");
+                        if setup_backoff_secs >= MAX_SETUP_BACKOFF_SECS {
+                            // Backoff has maxed out — Deribit refuses to accept
+                            // new subscriptions from this session. Exit so the
+                            // pod restarts with a fresh client identity.
+                            tracing::error!(connection_id = self.id,
+                                "setup repeatedly failed after max backoff, exiting to trigger pod restart");
+                            std::process::exit(1);
+                        }
                         select! {
                             _ = tokio::time::sleep(Duration::from_secs(setup_backoff_secs)) => {}
                             _ = ct.cancelled() => return Ok(()),
