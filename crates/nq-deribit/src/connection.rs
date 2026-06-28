@@ -257,12 +257,61 @@ impl Connection {
         Ok(res)
     }
 
+    /// Send a JSON-RPC request on the WebSocket and wait for the matching response.
+    /// Used during synchronous setup (before subscription data starts flowing).
+    async fn ws_call(
+        &self,
+        ws: &mut WebSocket,
+        payload: String,
+        request_id: i64,
+        timeout: Duration,
+    ) -> Result<String> {
+        ws.send(Message::Text(payload))
+            .await
+            .with_context(|| "ws_call send")?;
+
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(anyhow::Error::from(RequestTimeout));
+            }
+
+            let next = tokio::time::timeout(remaining, ws.next())
+                .await
+                .map_err(|_| anyhow::Error::from(RequestTimeout))
+                .with_context(|| "ws_call timeout")?;
+
+            let message = match next {
+                Some(Err(e)) => return Err(anyhow::Error::new(e).context("ws_call ws error")),
+                Some(Ok(m)) => m,
+                None => return Err(anyhow::anyhow!("ws_call ws closed")),
+            };
+
+            let text = match message {
+                Message::Text(t) => t,
+                Message::Binary(b) => String::from_utf8(b)?,
+                Message::Close { code, reason } => {
+                    return Err(anyhow::anyhow!("ws_call ws close(code={code}, reason={reason})"));
+                }
+                Message::Pong(_) => continue,
+                _ => continue,
+            };
+
+            let value: Value = serde_json::from_str(&text)
+                .with_context(|| "ws_call decode json")?;
+
+            if let Some(id) = value.get("id").and_then(|v| v.as_i64()) {
+                if id == request_id {
+                    return Ok(text);
+                }
+            }
+            // Ignore non-response messages during setup
+        }
+    }
+
     pub async fn eventloop(&self, ct: CancellationToken) -> Result<()> {
         debug!(connection_id = self.id, "connection eventloop begin");
-
-        // Bounded channels for per-reconnect eventloop communication
-        let (el_payload_tx, el_payload_rx) = flume::unbounded::<String>();
-        let (el_responser_tx, el_responser_rx) = flume::unbounded::<(i64, oneshot::Sender<String>)>();
 
         let mut backoff_secs: u64 = 1;
         const MAX_BACKOFF_SECS: u64 = 60;
@@ -284,7 +333,6 @@ impl Connection {
                         break ws;
                     }
                     Err(e) => {
-                        // Add ±25% jitter to spread out reconnect attempts
                         let jitter = (backoff_secs as f64 * 0.25) as u64;
                         let jittered = backoff_secs.saturating_sub(jitter)
                             + ((jitter_seed.wrapping_add(backoff_secs)) % (jitter * 2 + 1));
@@ -301,153 +349,121 @@ impl Connection {
             };
             debug!(connection_id = self.id, "websocket connected");
 
-            let (err_tx, err_rx) = flume::bounded(1);
+            // ── Synchronous setup: connect → heartbeat → auth → resubscribe ──
+            // Runs inline BEFORE the main select! loop so responses are read
+            // directly from ws.next() without channel indirection. This eliminates
+            // the starvation race between setup response routing and subscription
+            // data processing that caused the reconnect death spiral.
+            {
+                let conn_id = self.id;
+                let channels = self.channels.read().unwrap().clone();
+                let heartbeat_interval = self.config.heartbeat_interval;
+                let client_id = self.config.client_id.clone();
+                let client_secret = self.config.client_secret.clone();
+
+                // 1. Set heartbeat — also serves as a connection liveness probe.
+                //    If the new WebSocket can't even handle a simple heartbeat request
+                //    within 10s, the connection is dead (bad proxy backend, rate limit,
+                //    etc.) and we should reconnect immediately rather than waste 60s
+                //    on resubscribe timeouts.
+                let hb_id = 900_000 + conn_id as i64;
+                let hb_payload = json!({
+                    "jsonrpc": "2.0",
+                    "id": hb_id,
+                    "method": "public/set_heartbeat",
+                    "params": { "interval": heartbeat_interval }
+                }).to_string();
+                match self.ws_call(&mut ws, hb_payload, hb_id, Duration::from_secs(10)).await {
+                    Ok(_) => debug!(connection_id = conn_id, "heartbeat set"),
+                    Err(e) => {
+                        warn!(connection_id = conn_id, error = ?e, "heartbeat probe failed, reconnecting");
+                        continue; // reconnect immediately — connection is dead
+                    }
+                }
+
+                // 2. Auth if configured (non-fatal)
+                if let (Some(id), Some(secret)) = (&client_id, &client_secret) {
+                    let auth_id = 800_000 + conn_id as i64;
+                    let auth_val = {
+                        let mut val = serde_json::to_value(&AuthRequest::credential_auth(id, secret))
+                            .context("auth serialize")?;
+                        if let Some(obj) = val.as_object_mut() {
+                            obj.insert("jsonrpc".to_string(), json!("2.0"));
+                            obj.insert("id".to_string(), json!(auth_id));
+                        }
+                        val.to_string()
+                    };
+                    match self.ws_call(&mut ws, auth_val, auth_id, Duration::from_secs(10)).await {
+                        Ok(resp) => {
+                            if let Ok(result) = serde_json::from_str::<JSONRPCResponse<crate::request::authentication::AuthResponse>>(&resp) {
+                                if let either::Either::Left(auth_resp) = result.result {
+                                    *self.token.write().unwrap() = auth_resp.access_token;
+                                    info!(connection_id = conn_id, "authenticated");
+                                }
+                            }
+                        }
+                        Err(e) => warn!(connection_id = conn_id, error = ?e, "auth failed (non-fatal)"),
+                    }
+                }
+
+                // 3. Re-subscribe all tracked channels (batched, fatal — a connection
+                //    without subscriptions is useless; triggers reconnect on failure)
+                let channel_list: Vec<String> = channels.into_iter().collect();
+                if !channel_list.is_empty() {
+                    let setup_res = async {
+                        const BATCH_SIZE: usize = 100;
+                        const BATCH_DELAY_MS: u64 = 200;
+                        let total = channel_list.len();
+                        let mut base_id = 700_000 + conn_id as i64;
+                        let mut done = 0usize;
+                        for chunk in channel_list.chunks(BATCH_SIZE) {
+                            let sub_id = base_id;
+                            base_id += 1;
+                            let mut sub_val = serde_json::to_value(&PublicSubscribeRequest::new(chunk.to_vec()))?;
+                            if let Some(obj) = sub_val.as_object_mut() {
+                                obj.insert("jsonrpc".to_string(), json!("2.0"));
+                                obj.insert("id".to_string(), json!(sub_id));
+                            }
+                            self.ws_call(&mut ws, sub_val.to_string(), sub_id, Duration::from_secs(60)).await?;
+                            done += chunk.len();
+                            info!(connection_id = conn_id, progress = %format!("{}/{}", done, total), "resubscribed batch");
+                            if done < total {
+                                tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
+                            }
+                        }
+                        info!(connection_id = conn_id, "re-subscribed {} channels", total);
+                        Ok::<(), anyhow::Error>(())
+                    }.await;
+                    if let Err(e) = setup_res {
+                        warn!(connection_id = self.id, error = ?e, "setup resubscribe failed, reconnecting");
+                        continue; // reconnect with a fresh WebSocket
+                    }
+                }
+            }
+
+            // ── Main eventloop ──────────────────────────────────────────
             let mut responser_map: HashMap<i64, oneshot::Sender<String>> = HashMap::new();
             let mut message_map: HashMap<i64, String> = HashMap::new();
             const MAX_MAP_SIZE: usize = 1000;
 
-            // Setup task: heartbeat, auth, re-subscribe tracked channels
-            {
-                let err_tx = err_tx.clone();
-                let el_payload_tx = el_payload_tx.clone();
-                let el_responser_tx = el_responser_tx.clone();
-                let channels = self.channels.read().unwrap().clone();
-                let token = self.token.clone();
-                let heartbeat_interval = self.config.heartbeat_interval;
-                let client_id = self.config.client_id.clone();
-                let client_secret = self.config.client_secret.clone();
-                let conn_id = self.id;
-
-                tokio::spawn(async move {
-                    let res = async {
-                        // 1. Set heartbeat (non-fatal: Deribit subscription data still
-                        //    flows even if set_heartbeat fails or times out)
-                        let hb_id = 900_000 + conn_id as i64;
-                        let hb_payload = json!({
-                            "jsonrpc": "2.0",
-                            "id": hb_id,
-                            "method": "public/set_heartbeat",
-                            "params": { "interval": heartbeat_interval }
-                        }).to_string();
-                        let (tx, rx) = oneshot::channel();
-                        el_payload_tx.send_async(hb_payload).await?;
-                        el_responser_tx.send_async((hb_id, tx)).await?;
-                        match tokio::time::timeout(Duration::from_secs(10), rx).await {
-                            Ok(Ok(_)) => debug!(connection_id = conn_id, "heartbeat set"),
-                            Ok(Err(_)) => warn!(connection_id = conn_id, "heartbeat channel closed"),
-                            Err(_) => warn!(connection_id = conn_id, "heartbeat set_heartbeat timed out (non-fatal)"),
-                        }
-
-                        // 2. Auth if configured (non-fatal: public subscriptions work without it)
-                        if let (Some(id), Some(secret)) = (&client_id, &client_secret) {
-                            let auth_id = 800_000 + conn_id as i64;
-                            let mut auth_val = serde_json::to_value(&AuthRequest::credential_auth(id, secret))?;
-                            if let Some(obj) = auth_val.as_object_mut() {
-                                obj.insert("jsonrpc".to_string(), json!("2.0"));
-                                obj.insert("id".to_string(), json!(auth_id));
-                            }
-                            let (tx, rx) = oneshot::channel();
-                            el_payload_tx.send_async(auth_val.to_string()).await?;
-                            el_responser_tx.send_async((auth_id, tx)).await?;
-                            match tokio::time::timeout(Duration::from_secs(10), rx).await {
-                                Ok(Ok(resp)) => {
-                                    if let Ok(result) = serde_json::from_str::<JSONRPCResponse<crate::request::authentication::AuthResponse>>(&resp) {
-                                        if let either::Either::Left(auth_resp) = result.result {
-                                            *token.write().unwrap() = auth_resp.access_token;
-                                            info!(connection_id = conn_id, "authenticated");
-                                        }
-                                    }
-                                }
-                                Ok(Err(_)) => warn!(connection_id = conn_id, "auth channel closed (non-fatal)"),
-                                Err(_) => warn!(connection_id = conn_id, "auth timed out (non-fatal)"),
-                            }
-                        }
-
-                        // 3. Re-subscribe all tracked channels (batched)
-                        let channel_list: Vec<String> = channels.into_iter().collect();
-                        if !channel_list.is_empty() {
-                            const BATCH_SIZE: usize = 100;
-                            const BATCH_DELAY_MS: u64 = 200;
-                            let total = channel_list.len();
-                            let mut base_id = 700_000 + conn_id as i64;
-                            let mut done = 0usize;
-                            for chunk in channel_list.chunks(BATCH_SIZE) {
-                                let sub_id = base_id;
-                                base_id += 1;
-                                let mut sub_val = serde_json::to_value(&PublicSubscribeRequest::new(chunk.to_vec()))?;
-                                if let Some(obj) = sub_val.as_object_mut() {
-                                    obj.insert("jsonrpc".to_string(), json!("2.0"));
-                                    obj.insert("id".to_string(), json!(sub_id));
-                                }
-                                let (tx, rx) = oneshot::channel();
-                                el_payload_tx.send_async(sub_val.to_string()).await?;
-                                el_responser_tx.send_async((sub_id, tx)).await?;
-                                let _ = tokio::time::timeout(Duration::from_secs(60), rx).await?;
-                                done += chunk.len();
-                                if done < total {
-                                    tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
-                                }
-                            }
-                            info!(connection_id = conn_id, "re-subscribed {} channels", total);
-                        }
-
-                        Ok::<(), anyhow::Error>(())
-                    }.await;
-                    if let Err(e) = res {
-                        warn!(connection_id = conn_id, error = ?e, "setup task failed, triggering reconnect");
-                        // Signal the eventloop to break and reconnect with a fresh WS.
-                        // Without this, the connection limps along without heartbeat/auth
-                        // and eventually Deribit closes it without recovery.
-                        let _ = err_tx.send_async(e).await;
-                    }
-                });
-            }
-
-            // Main eventloop
-            // Use biased select to prevent ws.next() (constantly ready with
-            // subscription data) from starving the API response routing branches.
-            // Without biasing, setup task resubscribe responses can be delayed
-            // beyond the 60s timeout, causing a reconnect death spiral.
             loop {
                 select! {
                     biased;
 
-                    err = err_rx.recv_async() => {
-                        let err = err.with_context(|| "connection setup error")?;
-                        warn!(connection_id = self.id, error = ?err, "setup failed, reconnecting");
-                        break;
-                    }
                     () = ct.cancelled() => {
                         return Ok(());
                     }
-                    // ── Priority branches: API response routing MUST run before
-                    //     ws.next() to avoid starvation under high message load ──
-                    Ok((id, responser)) = el_responser_rx.recv_async() => {
-                        if let Some(text) = message_map.remove(&id) {
-                            let _ = responser.send(text);
-                        } else {
-                            if responser_map.len() >= MAX_MAP_SIZE {
-                                warn!(connection_id = self.id, map_size = responser_map.len(), "responser_map too large, clearing");
-                                responser_map.clear();
-                            }
-                            responser_map.insert(id, responser);
-                        }
-                    }
+                    // ── Priority: API response routing before ws.next() ──
                     Ok((id, responser)) = self.responser_rx.recv_async() => {
                         if let Some(text) = message_map.remove(&id) {
                             let _ = responser.send(text);
                         } else {
-                            // Prevent unbounded growth: if map is too large, clear stale entries
                             if responser_map.len() >= MAX_MAP_SIZE {
                                 warn!(connection_id = self.id, map_size = responser_map.len(), "responser_map too large, clearing");
                                 responser_map.clear();
                             }
                             responser_map.insert(id, responser);
                         }
-                    }
-                    msg = el_payload_rx.recv_async() => {
-                        let msg = msg.with_context(|| "connection recv el payload")?;
-                        ws.send(Message::Text(msg)).await.with_context(|| "connection ws send el")?;
                     }
                     msg = self.message_rx.recv_async() => {
                         let msg = msg.with_context(|| "connection recv message")?;
@@ -485,7 +501,6 @@ impl Connection {
                             if let Some(responser) = responser_map.remove(&id) {
                                 let _ = responser.send(text);
                             } else {
-                                // Prevent unbounded growth
                                 if message_map.len() >= MAX_MAP_SIZE {
                                     warn!(connection_id = self.id, map_size = message_map.len(), "message_map too large, clearing");
                                     message_map.clear();
@@ -506,15 +521,10 @@ impl Connection {
                                         "method": "public/test",
                                         "params": {}
                                     }).to_string();
-                                    let _ = el_payload_tx.send_async(test_payload).await;
+                                    let _ = ws.send(Message::Text(test_payload)).await;
                                 }
                                 "subscription" => {
                                     crate::metrics::DERIBIT_SUB_RECEIVED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    // Broadcast send is non-blocking: when the ring buffer is full,
-                                    // the oldest message is evicted to make room. This never
-                                    // blocks the WS reader and prevents OOM.
-                                    // SendError only occurs when there are zero receivers,
-                                    // which is a transient startup state.
                                     if let Some(tx) = self.subscription_broadcast_tx.get() {
                                         match tx.send(text) {
                                             Ok(_) => {
