@@ -100,6 +100,7 @@ impl Connection {
         // picked up by reconnect/resubscribe. Stop on first error to avoid wasting
         // time on a broken connection (each timeout is 60s).
         const BATCH_SIZE: usize = 100;
+        const BATCH_DELAY_MS: u64 = 200;
         let total = channels.len();
         let mut done = 0usize;
         for chunk in channels.chunks(BATCH_SIZE) {
@@ -115,6 +116,10 @@ impl Connection {
                     break; // stop trying — WS is down, reconnect will resubscribe
                 }
             }
+            // Small delay between batches to avoid Deribit rate limiting
+            if done < total {
+                tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
+            }
         }
 
         Ok(())
@@ -129,6 +134,7 @@ impl Connection {
         }
 
         const BATCH_SIZE: usize = 100;
+        const BATCH_DELAY_MS: u64 = 200;
         let total = channels.len();
         let mut done = 0usize;
         let mut failed = 0;
@@ -143,6 +149,9 @@ impl Connection {
                     warn!(connection_id = self.id, error = ?e, "resubscribe batch failed");
                     failed += chunk.len();
                 }
+            }
+            if done + failed < total {
+                tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
             }
         }
         info!(connection_id = self.id, success = done, failed, total, "resubscribe_all done");
@@ -358,7 +367,10 @@ impl Connection {
                         let channel_list: Vec<String> = channels.into_iter().collect();
                         if !channel_list.is_empty() {
                             const BATCH_SIZE: usize = 100;
+                            const BATCH_DELAY_MS: u64 = 200;
+                            let total = channel_list.len();
                             let mut base_id = 700_000 + conn_id as i64;
+                            let mut done = 0usize;
                             for chunk in channel_list.chunks(BATCH_SIZE) {
                                 let sub_id = base_id;
                                 base_id += 1;
@@ -371,8 +383,12 @@ impl Connection {
                                 el_payload_tx.send_async(sub_val.to_string()).await?;
                                 el_responser_tx.send_async((sub_id, tx)).await?;
                                 let _ = tokio::time::timeout(Duration::from_secs(60), rx).await?;
+                                done += chunk.len();
+                                if done < total {
+                                    tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
+                                }
                             }
-                            info!(connection_id = conn_id, "re-subscribed {} channels", channel_list.len());
+                            info!(connection_id = conn_id, "re-subscribed {} channels", total);
                         }
 
                         Ok::<(), anyhow::Error>(())
@@ -388,8 +404,14 @@ impl Connection {
             }
 
             // Main eventloop
+            // Use biased select to prevent ws.next() (constantly ready with
+            // subscription data) from starving the API response routing branches.
+            // Without biasing, setup task resubscribe responses can be delayed
+            // beyond the 60s timeout, causing a reconnect death spiral.
             loop {
                 select! {
+                    biased;
+
                     err = err_rx.recv_async() => {
                         let err = err.with_context(|| "connection setup error")?;
                         warn!(connection_id = self.id, error = ?err, "setup failed, reconnecting");
@@ -398,13 +420,18 @@ impl Connection {
                     () = ct.cancelled() => {
                         return Ok(());
                     }
-                    msg = self.message_rx.recv_async() => {
-                        let msg = msg.with_context(|| "connection recv message")?;
-                        ws.send(Message::Text(msg)).await.with_context(|| "connection ws send")?;
-                    }
-                    msg = el_payload_rx.recv_async() => {
-                        let msg = msg.with_context(|| "connection recv el payload")?;
-                        ws.send(Message::Text(msg)).await.with_context(|| "connection ws send el")?;
+                    // ── Priority branches: API response routing MUST run before
+                    //     ws.next() to avoid starvation under high message load ──
+                    Ok((id, responser)) = el_responser_rx.recv_async() => {
+                        if let Some(text) = message_map.remove(&id) {
+                            let _ = responser.send(text);
+                        } else {
+                            if responser_map.len() >= MAX_MAP_SIZE {
+                                warn!(connection_id = self.id, map_size = responser_map.len(), "responser_map too large, clearing");
+                                responser_map.clear();
+                            }
+                            responser_map.insert(id, responser);
+                        }
                     }
                     Ok((id, responser)) = self.responser_rx.recv_async() => {
                         if let Some(text) = message_map.remove(&id) {
@@ -418,16 +445,13 @@ impl Connection {
                             responser_map.insert(id, responser);
                         }
                     }
-                    Ok((id, responser)) = el_responser_rx.recv_async() => {
-                        if let Some(text) = message_map.remove(&id) {
-                            let _ = responser.send(text);
-                        } else {
-                            if responser_map.len() >= MAX_MAP_SIZE {
-                                warn!(connection_id = self.id, map_size = responser_map.len(), "responser_map too large, clearing");
-                                responser_map.clear();
-                            }
-                            responser_map.insert(id, responser);
-                        }
+                    msg = el_payload_rx.recv_async() => {
+                        let msg = msg.with_context(|| "connection recv el payload")?;
+                        ws.send(Message::Text(msg)).await.with_context(|| "connection ws send el")?;
+                    }
+                    msg = self.message_rx.recv_async() => {
+                        let msg = msg.with_context(|| "connection recv message")?;
+                        ws.send(Message::Text(msg)).await.with_context(|| "connection ws send")?;
                     }
                     next = ws.next() => {
                         let message = match next {

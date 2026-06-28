@@ -886,6 +886,7 @@ dependencies = [
  "nq-deribit",
  "nq-env",
  "nq-mqtt",
+ "reqwest",
  "rumqttc",
  "serde",
  "serde_json",

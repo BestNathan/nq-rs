@@ -50,8 +50,11 @@ async fn main() -> Result<()> {
         .build();
     let mqtt_async_client = mqtt_client.inner();
 
-    // 4. Create InstrumentFetcher
-    let fetcher = Arc::new(InstrumentFetcher::new(pool.first_connection()));
+    // 4. Create InstrumentFetcher (uses independent HTTP client, not WebSocket)
+    let http_client = reqwest::Client::builder()
+        .build()
+        .expect("create HTTP client for InstrumentFetcher");
+    let fetcher = Arc::new(InstrumentFetcher::new(http_client, config.rest_base_url.clone()));
 
     // 5. Create SubscriptionManager
     let sub_mgr = Arc::new(SubscriptionManager::new(

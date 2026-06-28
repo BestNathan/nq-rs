@@ -7,7 +7,8 @@ const DEFAULT_CURRENCIES: &str = "BTC,ETH";
 const DEFAULT_TICKER_INTERVAL: &str = "agg2";
 const DEFAULT_MQTT_TOPIC_PREFIX: &str = "t/deribit/option_ticker";
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 300;
-const DEFAULT_POOL_CAPACITY: usize = 500;
+const DEFAULT_POOL_CAPACITY: usize = 1400;
+const DEFAULT_REST_BASE_URL: &str = "https://www.deribit.com/api/v2";
 
 pub struct AppConfig {
     pub currencies: Vec<Currency>,
@@ -15,6 +16,7 @@ pub struct AppConfig {
     pub mqtt_topic_prefix: String,
     pub poll_interval_secs: u64,
     pub pool_capacity: usize,
+    pub rest_base_url: String,
 }
 
 impl AppConfig {
@@ -44,12 +46,16 @@ impl AppConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_POOL_CAPACITY);
 
+        let rest_base_url = env::var("DERIBIT_REST_URL")
+            .unwrap_or(DEFAULT_REST_BASE_URL.to_string());
+
         Self {
             currencies,
             ticker_interval,
             mqtt_topic_prefix,
             poll_interval_secs,
             pool_capacity,
+            rest_base_url,
         }
     }
 }

@@ -1,20 +1,28 @@
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
+use reqwest::Client;
+use serde::Deserialize;
 use tracing::{debug, warn};
 
-use nq_deribit::connection::Connection;
 use nq_deribit::model::currency::Currency;
 use nq_deribit::model::instrument::InstrumentInfo;
-use nq_deribit::request::market_data::{GetInstrumentsRequest, GetInstrumentsResponse};
+
+/// JSON-RPC response wrapper returned by Deribit REST API.
+#[derive(Deserialize, Debug)]
+struct JsonRpcResponse<T> {
+    result: T,
+}
 
 pub struct InstrumentFetcher {
-    connection: Arc<Connection>,
+    http_client: Client,
+    rest_base_url: String,
 }
 
 impl InstrumentFetcher {
-    pub fn new(connection: Arc<Connection>) -> Self {
-        Self { connection }
+    pub fn new(http_client: Client, rest_base_url: String) -> Self {
+        Self {
+            http_client,
+            rest_base_url,
+        }
     }
 
     pub async fn fetch_all_options(&self, currencies: &[Currency]) -> Result<Vec<InstrumentInfo>> {
@@ -36,9 +44,21 @@ impl InstrumentFetcher {
     }
 
     async fn fetch_options(&self, currency: Currency) -> Result<Vec<InstrumentInfo>> {
-        let req = GetInstrumentsRequest::options(currency);
-        let resp: GetInstrumentsResponse = self.connection.call_api(req).await
-            .with_context(|| format!("get_instruments for {:?}", currency))?;
-        Ok(resp)
+        let url = format!(
+            "{}/public/get_instruments?currency={}&kind=option&expired=false",
+            self.rest_base_url, currency
+        );
+
+        let response: JsonRpcResponse<Vec<InstrumentInfo>> = self
+            .http_client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("get_instruments HTTP request for {:?}", currency))?
+            .json()
+            .await
+            .with_context(|| format!("get_instruments JSON parse for {:?}", currency))?;
+
+        Ok(response.result)
     }
 }
