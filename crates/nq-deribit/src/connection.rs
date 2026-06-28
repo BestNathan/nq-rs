@@ -99,7 +99,7 @@ impl Connection {
         // Channels are already in the tracked set, so any that fail here will be
         // picked up by reconnect/resubscribe. Stop on first error to avoid wasting
         // time on a broken connection (each timeout is 60s).
-        const BATCH_SIZE: usize = 100;
+        const BATCH_SIZE: usize = 250;
         const BATCH_DELAY_MS: u64 = 200;
         let total = channels.len();
         let mut done = 0usize;
@@ -133,7 +133,7 @@ impl Connection {
             return Ok(());
         }
 
-        const BATCH_SIZE: usize = 100;
+        const BATCH_SIZE: usize = 250;
         const BATCH_DELAY_MS: u64 = 200;
         let total = channels.len();
         let mut done = 0usize;
@@ -411,7 +411,7 @@ impl Connection {
                 let channel_list: Vec<String> = channels.into_iter().collect();
                 if !channel_list.is_empty() {
                     let setup_res = async {
-                        const BATCH_SIZE: usize = 100;
+                        const BATCH_SIZE: usize = 250;
                         const BATCH_DELAY_MS: u64 = 200;
                         let total = channel_list.len();
                         let mut base_id = 700_000 + conn_id as i64;

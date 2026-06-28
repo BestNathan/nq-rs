@@ -7,7 +7,7 @@ const DEFAULT_CURRENCIES: &str = "BTC,ETH";
 const DEFAULT_TICKER_INTERVAL: &str = "agg2";
 const DEFAULT_MQTT_TOPIC_PREFIX: &str = "t/deribit/option_ticker";
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 300;
-const DEFAULT_POOL_CAPACITY: usize = 1400;
+const DEFAULT_POOL_CAPACITY: usize = 2000;
 const DEFAULT_REST_BASE_URL: &str = "https://www.deribit.com/api/v2";
 
 pub struct AppConfig {
