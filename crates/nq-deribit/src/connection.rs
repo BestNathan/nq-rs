@@ -314,7 +314,9 @@ impl Connection {
         debug!(connection_id = self.id, "connection eventloop begin");
 
         let mut backoff_secs: u64 = 1;
+        let mut setup_backoff_secs: u64 = 5; // independent of connect backoff
         const MAX_BACKOFF_SECS: u64 = 60;
+        const MAX_SETUP_BACKOFF_SECS: u64 = 120;
 
         // Per-connection random seed for jitter, to prevent all connections
         // from reconnecting simultaneously (thundering herd).
@@ -376,15 +378,12 @@ impl Connection {
                 match self.ws_call(&mut ws, hb_payload, hb_id, Duration::from_secs(10)).await {
                     Ok(_) => debug!(connection_id = conn_id, "heartbeat set"),
                     Err(e) => {
-                        warn!(connection_id = conn_id, error = ?e, backoff_secs, "heartbeat probe failed, reconnecting");
-                        // Apply backoff before reconnecting — Deribit may need time
-                        // to clean up the old session before accepting a new one.
-                        let delay = backoff_secs.max(5);
+                        warn!(connection_id = conn_id, error = ?e, setup_backoff_secs, "heartbeat probe failed, reconnecting");
                         select! {
-                            _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+                            _ = tokio::time::sleep(Duration::from_secs(setup_backoff_secs)) => {}
                             _ = ct.cancelled() => return Ok(()),
                         }
-                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                        setup_backoff_secs = (setup_backoff_secs * 2).min(MAX_SETUP_BACKOFF_SECS);
                         continue;
                     }
                 }
@@ -443,19 +442,16 @@ impl Connection {
                         Ok::<(), anyhow::Error>(())
                     }.await;
                     if let Err(e) = setup_res {
-                        warn!(connection_id = self.id, error = ?e, backoff_secs, "setup resubscribe failed, reconnecting");
-                        // Backoff before reconnect — Deribit needs time to expire
-                        // the old WebSocket session before accepting new subscriptions.
-                        let delay = backoff_secs.max(5);
+                        warn!(connection_id = self.id, error = ?e, setup_backoff_secs, "setup resubscribe failed, reconnecting");
                         select! {
-                            _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+                            _ = tokio::time::sleep(Duration::from_secs(setup_backoff_secs)) => {}
                             _ = ct.cancelled() => return Ok(()),
                         }
-                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                        setup_backoff_secs = (setup_backoff_secs * 2).min(MAX_SETUP_BACKOFF_SECS);
                         continue;
                     }
                     // Successful setup: reset backoff
-                    backoff_secs = 1;
+                    setup_backoff_secs = 5;
                 }
             }
 
