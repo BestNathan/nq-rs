@@ -1,7 +1,9 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 use nq_deribit::model::currency::Currency;
 use nq_deribit::model::instrument::InstrumentInfo;
@@ -11,6 +13,9 @@ use nq_deribit::model::instrument::InstrumentInfo;
 struct JsonRpcResponse<T> {
     result: T,
 }
+
+/// Max seconds until expiration to include an option.
+const MAX_EXPIRY_SECS: u64 = 30 * 24 * 3600; // 30 days
 
 pub struct InstrumentFetcher {
     http_client: Client,
@@ -26,13 +31,25 @@ impl InstrumentFetcher {
     }
 
     pub async fn fetch_all_options(&self, currencies: &[Currency]) -> Result<Vec<InstrumentInfo>> {
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let cutoff_ms = (now_secs + MAX_EXPIRY_SECS) * 1000;
+
         let mut all_options = Vec::new();
 
         for currency in currencies {
             match self.fetch_options(*currency).await {
                 Ok(options) => {
-                    debug!(currency = ?currency, count = options.len(), "fetched options");
-                    all_options.extend(options);
+                    let before = options.len();
+                    let filtered: Vec<InstrumentInfo> = options
+                        .into_iter()
+                        .filter(|o| o.expiration_timestamp <= cutoff_ms)
+                        .collect();
+                    info!(currency = ?currency, before, after = filtered.len(),
+                        cutoff_days = 30, "fetched and filtered options");
+                    all_options.extend(filtered);
                 }
                 Err(e) => {
                     warn!(currency = ?currency, error = ?e, "failed to fetch options, will retry on next poll");
