@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use tracing::{debug, info, warn};
 
-use crate::jsonrpc::{IDGenerator, JSONRPCResponse};
+use crate::jsonrpc::{IDGenerator, JSONRPCResponse, JSPNRPCRequest};
 use crate::request::authentication::AuthRequest;
 use crate::request::subscribe::PublicSubscribeRequest;
 
@@ -157,18 +157,12 @@ impl ProtocolHandler {
         let mut done = 0usize;
 
         for chunk in channel_list.chunks(BATCH_SIZE) {
-            let mut sub_val = serde_json::to_value(
-                &PublicSubscribeRequest::new(chunk.to_vec()),
-            )?;
-            if let Some(obj) = sub_val.as_object_mut() {
-                obj.insert("jsonrpc".to_string(), json!("2.0"));
-                obj.insert(
-                    "id".to_string(),
-                    json!(crate::jsonrpc::global_id_generator().next_id()),
-                );
-            }
+            let req = JSPNRPCRequest::<PublicSubscribeRequest>::from(
+                PublicSubscribeRequest::new(chunk.to_vec()),
+            );
+            let sub_payload = serde_json::to_string(&req)?;
             caller
-                .call(&sub_val.to_string(), Duration::from_secs(60))
+                .call(&sub_payload, Duration::from_secs(60))
                 .await?;
             done += chunk.len();
             info!(
