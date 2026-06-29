@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
-use anyhow::{Error, Result, anyhow};
+use anyhow::{Context, Error, Result, anyhow};
 use either::Either;
 use reqwest_websocket::Message;
 use serde::{Deserialize, Serialize};
@@ -150,8 +150,84 @@ impl IDGenerator for DefaultIDGenerator {
     }
 }
 
+// ─── Validation ──────────────────────────────────────────────────────
+
+/// Validate that a JSON-RPC 2.0 request payload has the required fields:
+/// `jsonrpc`, `method`, `id`. Rejects responses and notifications.
+///
+/// This catches protocol errors like missing `method` or `params` wrapper
+/// that occur when JSON is assembled manually instead of using
+/// [`JSPNRPCRequest`].
+pub fn validate_jsonrpc_request(payload: &str) -> Result<()> {
+    let val: Value = serde_json::from_str(payload).context("invalid JSON")?;
+
+    let obj = val.as_object().context("JSON-RPC request must be an object")?;
+
+    let version = obj
+        .get("jsonrpc")
+        .and_then(|v| v.as_str())
+        .context("missing 'jsonrpc' field")?;
+    anyhow::ensure!(version == "2.0", "jsonrpc version must be '2.0', got '{version}'");
+
+    // Must have a method (reject if it's a response with "result"/"error")
+    anyhow::ensure!(
+        obj.contains_key("method"),
+        "missing 'method' field — did you forget to wrap params in a JSPNRPCRequest?"
+    );
+
+    // Must have an id (notifications lack id, but we only send requests)
+    anyhow::ensure!(
+        obj.contains_key("id"),
+        "missing 'id' field — JSON-RPC requests require an id for correlation"
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
+    use super::*;
+
+    // ── validate_jsonrpc_request tests ─────────────────────────────
+
+    #[test]
+    fn test_validate_correct_request() {
+        // A proper JSPNRPCRequest-serialized payload
+        let payload = r#"{"jsonrpc":"2.0","id":1,"method":"public/auth","params":{"grant_type":"client_credentials","client_id":"x","client_secret":"y"}}"#;
+        assert!(validate_jsonrpc_request(payload).is_ok());
+    }
+
+    #[test]
+    fn test_validate_missing_method() {
+        // The bug we had: manually assembled without "method" field
+        let payload = r#"{"grant_type":"client_credentials","client_id":"x","client_secret":"y","jsonrpc":"2.0","id":1}"#;
+        let err = validate_jsonrpc_request(payload).unwrap_err();
+        assert!(err.to_string().contains("method"), "expected 'method' error, got: {err}");
+    }
+
+    #[test]
+    fn test_validate_missing_jsonrpc() {
+        let payload = r#"{"id":1,"method":"public/test","params":{}}"#;
+        assert!(validate_jsonrpc_request(payload).is_err());
+    }
+
+    #[test]
+    fn test_validate_missing_id() {
+        let payload = r#"{"jsonrpc":"2.0","method":"public/test","params":{}}"#;
+        assert!(validate_jsonrpc_request(payload).is_err());
+    }
+
+    #[test]
+    fn test_validate_not_json() {
+        assert!(validate_jsonrpc_request("not json").is_err());
+    }
+
+    #[test]
+    fn test_validate_not_object() {
+        assert!(validate_jsonrpc_request("[]").is_err());
+    }
+
+    // ── existing tests ─────────────────────────────────────────────
     use serde_json::Value;
 
     use super::JSONRPCResponse;

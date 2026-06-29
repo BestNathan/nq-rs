@@ -32,6 +32,11 @@ struct SetupCaller<'a> {
 #[async_trait]
 impl JsonRpcCaller for SetupCaller<'_> {
     async fn call(&mut self, payload: &str, timeout: Duration) -> Result<String> {
+        // Validate JSON-RPC format before sending — catches protocol errors
+        // like missing "method" or "params" fields at send time.
+        crate::jsonrpc::validate_jsonrpc_request(payload)
+            .context("SetupCaller: invalid JSON-RPC request")?;
+
         let id = {
             let value: serde_json::Value = serde_json::from_str(payload)
                 .with_context(|| "SetupCaller: invalid JSON")?;
@@ -535,6 +540,12 @@ impl Connection {
                             for action in actions {
                                 match action {
                                     OutgoingAction::Send(payload) => {
+                                        if let Err(e) = crate::jsonrpc::validate_jsonrpc_request(&payload) {
+                                            warn!(connection_id = self.id,
+                                                error = ?e,
+                                                payload = %payload,
+                                                "invalid JSON-RPC request (OutgoingAction::Send)");
+                                        }
                                         if let Err(e) = transport.send(payload).await {
                                             warn!(connection_id = self.id,
                                                 error = ?e,
@@ -542,6 +553,12 @@ impl Connection {
                                         }
                                     }
                                     OutgoingAction::ExpectResponse(payload, id) => {
+                                        if let Err(e) = crate::jsonrpc::validate_jsonrpc_request(&payload) {
+                                            warn!(connection_id = self.id,
+                                                error = ?e,
+                                                payload = %payload,
+                                                "invalid JSON-RPC request (OutgoingAction::ExpectResponse)");
+                                        }
                                         // Register a dummy waiter so the response
                                         // doesn't trigger "no waiter for response"
                                         let (tx, _rx) = oneshot::channel();
