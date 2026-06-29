@@ -1,0 +1,92 @@
+{
+  "title": "nq-deribit",
+  "tags": ["deribit", "nq-rs"],
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Deribit Sub Received / sec",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(deribit_sub_received_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Deribit Sub Enqueued vs Dropped / sec",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(deribit_sub_enqueued_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - enqueued"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(deribit_sub_dropped_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - dropped"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "id": 3,
+      "title": "MQTT Published vs Failed / sec",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(mqtt_published_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - published"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(mqtt_publish_failed_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - failed"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Application Logs",
+      "type": "logs",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{service_name=~\"deribit-.*\"}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Traces",
+      "type": "traces",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{ .service.name =~ \"deribit-.*\" }"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39
+}
