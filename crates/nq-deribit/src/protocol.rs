@@ -103,20 +103,10 @@ impl ProtocolHandler {
         if let (Some(client_id), Some(client_secret)) =
             (&self.client_id, &self.client_secret)
         {
-            let auth_payload = {
-                let mut val = serde_json::to_value(
-                    &AuthRequest::credential_auth(client_id, client_secret),
-                )
-                .context("auth serialize")?;
-                if let Some(obj) = val.as_object_mut() {
-                    obj.insert("jsonrpc".to_string(), json!("2.0"));
-                    obj.insert(
-                        "id".to_string(),
-                        json!(crate::jsonrpc::global_id_generator().next_id()),
-                    );
-                }
-                val.to_string()
-            };
+            let req = JSPNRPCRequest::<AuthRequest>::from(
+                AuthRequest::credential_auth(client_id, client_secret),
+            );
+            let auth_payload = serde_json::to_string(&req).context("auth serialize")?;
             match caller.call(&auth_payload, Duration::from_secs(10)).await {
                 Ok(resp) => {
                     if let Ok(result) = serde_json::from_str::<
