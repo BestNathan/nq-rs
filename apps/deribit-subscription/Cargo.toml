@@ -10,6 +10,7 @@ nq-app = {workspace = true}
 nq-deribit = {workspace = true}
 nq-env = {workspace = true}
 nq-mqtt = {workspace = true}
+nq-observability = {workspace = true}
 rumqttc = "0.24.0"
 serde = {workspace = true}
 serde_json = {workspace = true}

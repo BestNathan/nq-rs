@@ -150,7 +150,7 @@ impl Runner for App {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    let _guard = nq_observability::init_telemetry("deribit-subscription")?;
 
     let channels = resolve_channels();
 

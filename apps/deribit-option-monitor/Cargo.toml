@@ -12,6 +12,7 @@ nq-app = {workspace = true}
 nq-deribit = {workspace = true}
 nq-env = {workspace = true}
 nq-mqtt = {workspace = true}
+nq-observability = {workspace = true}
 reqwest = {version = "0.12", default-features = false, features = ["rustls-tls", "json"]}
 rumqttc = "0.24.0"
 serde = {workspace = true}

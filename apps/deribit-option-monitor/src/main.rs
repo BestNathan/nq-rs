@@ -18,7 +18,7 @@ use ticker_router::TickerRouter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    let _guard = nq_observability::init_telemetry("deribit-option-monitor")?;
 
     let config = AppConfig::from_env();
 
