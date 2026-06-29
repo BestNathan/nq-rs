@@ -16,6 +16,7 @@ nq-deribit = { path = "./crates/nq-deribit" }
 nq-env = { path = "./crates/nq-env" }
 nq-macro = { path = "./crates/nq-macro" }
 nq-mqtt = { path = "./crates/nq-mqtt" }
+nq-observability = { path = "./crates/nq-observability" }
 
 # fluvio
 fluvio = { git = "https://github.com/infinyon/fluvio", tag = "v0.16.1" }
