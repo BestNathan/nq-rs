@@ -133,12 +133,10 @@ impl Runner for App {
                             true,
                             data,
                         ).await {
-                            nq_deribit::metrics::MQTT_PUBLISH_FAILED
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(1, &[]);
                             warn!(error = ?e, "mqtt publish failed");
                         } else {
-                            nq_deribit::metrics::MQTT_PUBLISHED
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            nq_deribit::metrics::DERIBIT_METRICS.mqtt_published.add(1, &[]);
                         }
                     }
                 },

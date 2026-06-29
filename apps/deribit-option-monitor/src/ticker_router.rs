@@ -91,14 +91,14 @@ impl Runner for TickerRouter {
                             )
                         ).await {
                             Ok(Ok(())) => {
-                                metrics::MQTT_PUBLISHED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_published.add(1, &[]);
                             }
                             Ok(Err(e)) => {
-                                metrics::MQTT_PUBLISH_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(1, &[]);
                                 warn!(error = ?e, topic = topic, "mqtt publish failed");
                             }
                             Err(_timeout) => {
-                                metrics::MQTT_PUBLISH_FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(1, &[]);
                                 // Don't warn on every timeout — would flood logs at ~150 msg/s
                             }
                         }

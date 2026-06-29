@@ -296,18 +296,18 @@ impl Client {
                                     }
                                 }
                                 "subscription" => {
-                                    crate::metrics::DERIBIT_SUB_RECEIVED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    crate::metrics::DERIBIT_METRICS.sub_received.add(1, &[]);
                                     // Use try_send to avoid blocking WS reader when channel is full
                                     match self.subscription_tx.try_send(text) {
                                         Ok(_) => {
-                                            crate::metrics::DERIBIT_SUB_ENQUEUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                            crate::metrics::DERIBIT_METRICS.sub_enqueued.add(1, &[]);
                                         }
                                         Err(flume::TrySendError::Full(_)) => {
-                                            crate::metrics::DERIBIT_SUB_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                            crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, &[]);
                                             warn!("subscription channel full, dropping ticker message");
                                         }
                                         Err(flume::TrySendError::Disconnected(_)) => {
-                                            crate::metrics::DERIBIT_SUB_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                            crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, &[]);
                                             warn!("subscription rx disconnected");
                                         }
                                     }

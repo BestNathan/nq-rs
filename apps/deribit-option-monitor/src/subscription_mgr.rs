@@ -217,26 +217,19 @@ impl Runner for SubscriptionManager {
             debug!("instrument state loop done");
         });
 
-        // Task 3: Periodic metrics logging (every 60 seconds)
+        // Task 3: Periodic status logging (every 60 seconds)
         let ct3 = ct.clone();
         let tracked3 = tracked.clone();
         let pool3 = pool.clone();
-        let mut prev_snapshot = nq_deribit::metrics::MetricsSnapshot::read();
         tokio::spawn(async move {
             loop {
                 select! {
                     _ = ct3.cancelled() => break,
                     _ = sleep(Duration::from_secs(60)) => {
-                        let snapshot = nq_deribit::metrics::MetricsSnapshot::read();
-                        let rates = snapshot.rates_since(&prev_snapshot, 60.0);
-                        prev_snapshot = snapshot;
-
                         let t_count = tracked3.read().unwrap().len();
                         let conn_count = pool3.connection_count();
                         let conns = pool3.connection_runners();
                         let channel_counts: Vec<usize> = conns.iter().map(|c| c.channel_count()).collect();
-
-                        // Read memory usage (cross-platform)
                         let memory_kb = read_memory_kb();
 
                         info!(
@@ -244,23 +237,12 @@ impl Runner for SubscriptionManager {
                             connections = conn_count,
                             channel_counts = ?channel_counts,
                             memory_kb = memory_kb,
-                            // Cumulative counters
-                            deribit_received = snapshot.deribit_sub_received,
-                            deribit_enqueued = snapshot.deribit_sub_enqueued,
-                            deribit_dropped = snapshot.deribit_sub_dropped,
-                            mqtt_published = snapshot.mqtt_published,
-                            mqtt_failed = snapshot.mqtt_publish_failed,
-                            // Per-second rates (over last 60s window)
-                            deribit_recv_per_sec = format_rate(rates.deribit_sub_received_per_sec),
-                            deribit_enq_per_sec = format_rate(rates.deribit_sub_enqueued_per_sec),
-                            deribit_drop_per_sec = format_rate(rates.deribit_sub_dropped_per_sec),
-                            mqtt_pub_per_sec = format_rate(rates.mqtt_published_per_sec),
-                            "periodic metrics (1m)"
+                            "periodic status (1m)"
                         );
                     }
                 }
             }
-            debug!("metrics loop done");
+            debug!("status loop done");
         });
 
         ct.cancelled().await;
@@ -309,7 +291,3 @@ fn read_memory_kb() -> u64 {
     }
 }
 
-/// Format a f64 rate to a compact string with 1 decimal place.
-fn format_rate(rate: f64) -> String {
-    format!("{:.1}", rate)
-}
