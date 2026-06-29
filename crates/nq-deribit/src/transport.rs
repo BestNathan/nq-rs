@@ -19,8 +19,6 @@ pub enum TransportError {
     RecvFailed(#[source] anyhow::Error),
     #[error("websocket closed: code={code:?} reason={reason}")]
     Closed { code: Option<u16>, reason: String },
-    #[error("pong timeout — connection is dead")]
-    PongTimeout,
     #[error("transport not connected")]
     NotConnected,
 }
@@ -52,15 +50,8 @@ pub trait Transport: Send {
     /// - Close → returns `Ok(None)` (clean close)
     /// - Text/Binary → returns `Ok(Some(text))`
     ///
-    /// Returns `Err(PongTimeout)` if no Pong received within the configured
-    /// pong_timeout duration (checked at the start of each recv call).
+    /// Also sends periodic Ping frames internally for keepalive.
     async fn recv(&mut self) -> Result<Option<String>, TransportError>;
-
-    /// Send a WebSocket Ping frame for keepalive.
-    /// The caller should call this on a regular interval (e.g., every 15s).
-    /// The corresponding Pong is tracked internally; if no Pong arrives
-    /// within pong_timeout, the next `recv()` call returns `PongTimeout`.
-    async fn send_ping(&mut self) -> Result<(), TransportError>;
 
     /// Close the WebSocket connection cleanly.
     async fn close(&mut self) -> Result<(), TransportError>;
@@ -108,10 +99,6 @@ impl WsTransportImpl {
         }
     }
 
-    /// Returns the ping interval for scheduling in the eventloop.
-    pub fn ping_interval(&self) -> Duration {
-        self.ping_interval
-    }
 }
 
 #[async_trait]
@@ -160,33 +147,43 @@ impl Transport for WsTransportImpl {
             .as_mut()
             .ok_or(TransportError::NotConnected)?;
 
-        // ── Pong timeout check ──────────────────────────────────────────
-        // Check BEFORE blocking on ws.next() so we detect dead connections
-        // promptly even when no messages are arriving.
+        // ── Pong timeout check (warn only) ─────────────────────────
         if let Some(last_pong) = self.last_pong {
             if last_pong.elapsed() > self.pong_timeout {
                 warn!(
                     connection_id = self.conn_id,
                     elapsed_ms = last_pong.elapsed().as_millis(),
                     timeout_ms = self.pong_timeout.as_millis(),
-                    "pong timeout — connection is dead"
+                    "pong timeout — server may not support WS ping/pong"
                 );
-                return Err(TransportError::PongTimeout);
+                // Reset to avoid log spam; server uses its own heartbeat
+                self.last_pong = Some(Instant::now());
             }
         }
 
-        // ── Read next message with internal Ping/Pong handling ────────
-        // Use a loop (not recursion) to avoid stack growth under heavy
-        // Ping/Pong traffic.
+        // ── Read next message with internal ping timer ────────────
+        let mut next_ping = tokio::time::Instant::now() + self.ping_interval;
         loop {
-            let message = match ws.next().await {
-                Some(Ok(m)) => m,
-                Some(Err(e)) => {
-                    return Err(TransportError::RecvFailed(e.into()));
+            let message = tokio::select! {
+                msg = ws.next() => {
+                    match msg {
+                        Some(Ok(m)) => m,
+                        Some(Err(e)) => {
+                            return Err(TransportError::RecvFailed(e.into()));
+                        }
+                        None => {
+                            debug!(connection_id = self.conn_id, "ws stream ended");
+                            return Ok(None);
+                        }
+                    }
                 }
-                None => {
-                    debug!(connection_id = self.conn_id, "ws stream ended");
-                    return Ok(None);
+                _ = tokio::time::sleep_until(next_ping) => {
+                    trace!(connection_id = self.conn_id, "sending ping (internal timer)");
+                    if let Err(e) = ws.send(Message::Ping(Vec::new())).await {
+                        warn!(connection_id = self.conn_id, error = ?e, "failed to send ping");
+                    }
+                    next_ping = tokio::time::Instant::now() + self.ping_interval;
+                    continue;
                 }
             };
 
@@ -204,16 +201,13 @@ impl Transport for WsTransportImpl {
                 }
                 Message::Ping(data) => {
                     trace!(connection_id = self.conn_id, "recv ping, sending pong");
-                    // Auto-respond to peer-initiated pings
                     if let Err(e) = ws.send(Message::Pong(data)).await {
                         warn!(connection_id = self.conn_id, error = ?e, "failed to send pong");
                     }
-                    // Continue loop to get the next real message
                 }
                 Message::Pong(_data) => {
                     trace!(connection_id = self.conn_id, "recv pong");
                     self.last_pong = Some(Instant::now());
-                    // Continue loop to get the next real message
                 }
                 Message::Close { code, reason } => {
                     let code_u16: u16 = code.into();
@@ -227,18 +221,6 @@ impl Transport for WsTransportImpl {
                 }
             }
         }
-    }
-
-    async fn send_ping(&mut self) -> Result<(), TransportError> {
-        let ws = self
-            .ws
-            .as_mut()
-            .ok_or(TransportError::NotConnected)?;
-
-        trace!(connection_id = self.conn_id, "sending ping");
-        ws.send(Message::Ping(Vec::new()))
-            .await
-            .map_err(|e| TransportError::SendFailed(e.into()))
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
@@ -275,9 +257,6 @@ mod tests {
     fn test_transport_error_display() {
         let err = TransportError::NotConnected;
         assert!(err.to_string().contains("not connected"));
-
-        let err = TransportError::PongTimeout;
-        assert!(err.to_string().contains("pong timeout"));
     }
 
     /// WsTransportImpl can be constructed without panicking.
@@ -292,7 +271,6 @@ mod tests {
             0,
         );
         assert!(!t.is_connected());
-        assert_eq!(t.ping_interval(), Duration::from_secs(15));
     }
 
     /// Send fails with NotConnected when not connected.
