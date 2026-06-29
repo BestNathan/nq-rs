@@ -16,10 +16,10 @@ use crate::request::subscribe::PublicSubscribeRequest;
 /// Abstracts the channel-based call mechanism so Protocol doesn't need
 /// to know about Connection internals.
 #[async_trait::async_trait]
-pub trait JsonRpcCaller: Send + Sync {
+pub trait JsonRpcCaller: Send {
     /// Send a JSON-RPC request payload and wait for the matching response.
     /// The payload must include an "id" field for correlation.
-    async fn call(&self, payload: &str, timeout: Duration) -> Result<String>;
+    async fn call(&mut self, payload: &str, timeout: Duration) -> Result<String>;
 }
 
 // ─── OutgoingAction ──────────────────────────────────────────────────
@@ -78,7 +78,7 @@ impl ProtocolHandler {
     ///   3. Re-subscribe all tracked channels (60s/batch timeout, fatal)
     pub async fn run_setup(
         &self,
-        caller: &dyn JsonRpcCaller,
+        caller: &mut dyn JsonRpcCaller,
     ) -> Result<()> {
         let conn_id = self.conn_id;
 
@@ -148,7 +148,7 @@ impl ProtocolHandler {
     /// channel dispatch instead of direct transport.recv()).
     async fn resubscribe_via_caller(
         &self,
-        caller: &dyn JsonRpcCaller,
+        caller: &mut dyn JsonRpcCaller,
         channel_list: &[String],
     ) -> Result<()> {
         const BATCH_SIZE: usize = 250;
@@ -271,7 +271,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl JsonRpcCaller for MockCaller {
-        async fn call(&self, _payload: &str, _timeout: Duration) -> Result<String> {
+        async fn call(&mut self, _payload: &str, _timeout: Duration) -> Result<String> {
             self.responses
                 .lock()
                 .unwrap()
@@ -328,20 +328,20 @@ mod tests {
     #[tokio::test]
     async fn test_run_setup_heartbeat_only() {
         let handler = make_handler();
-        let caller = MockCaller::new();
+        let mut caller = MockCaller::new();
         caller.queue_ok(r#"{"jsonrpc":"2.0","id":1,"result":{"interval":30}}"#);
 
-        let result = handler.run_setup(&caller).await;
+        let result = handler.run_setup(&mut caller).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_run_setup_heartbeat_fails() {
         let handler = make_handler();
-        let caller = MockCaller::new();
+        let mut caller = MockCaller::new();
         caller.queue_err("timeout");
 
-        let result = handler.run_setup(&caller).await;
+        let result = handler.run_setup(&mut caller).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("heartbeat"));
     }
@@ -360,11 +360,11 @@ mod tests {
             None,
         );
 
-        let caller = MockCaller::new();
+        let mut caller = MockCaller::new();
         caller.queue_ok(r#"{"jsonrpc":"2.0","id":1,"result":{"interval":30}}"#);
         caller.queue_ok(r#"{"jsonrpc":"2.0","id":2,"result":["ticker.BTC-PERP.agg2"]}"#);
 
-        let result = handler.run_setup(&caller).await;
+        let result = handler.run_setup(&mut caller).await;
         assert!(result.is_ok());
     }
 }
