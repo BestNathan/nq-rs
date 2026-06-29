@@ -27,6 +27,16 @@ spec:
               value: http://192.168.2.98:8890
             - name: HTTPS_PROXY
               value: http://192.168.2.98:8890
+            - name: DERIBIT_API_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: deribit-subscription-secrets
+                  key: DERIBIT_CLIENT_ID
+            - name: DERIBIT_API_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: deribit-subscription-secrets
+                  key: DERIBIT_CLIENT_SECRET
             - name: DERIBIT_SUBSCRIPTION_CHANNELS_FILE
               value: /etc/deribit-subscription/channels.txt
           volumeMounts:

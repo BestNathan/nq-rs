@@ -541,6 +541,17 @@ impl Connection {
                                                 "transport send (notification response) failed");
                                         }
                                     }
+                                    OutgoingAction::ExpectResponse(payload, id) => {
+                                        // Register a dummy waiter so the response
+                                        // doesn't trigger "no waiter for response"
+                                        let (tx, _rx) = oneshot::channel();
+                                        responser_map.insert(id, tx);
+                                        if let Err(e) = transport.send(payload).await {
+                                            warn!(connection_id = self.id,
+                                                error = ?e,
+                                                "transport send (heartbeat) failed");
+                                        }
+                                    }
                                 }
                             }
                         } else {

@@ -29,6 +29,11 @@ pub trait JsonRpcCaller: Send {
 pub enum OutgoingAction {
     /// Send this payload on the transport.
     Send(String),
+    /// Send this payload and register a dummy waiter for its JSON-RPC `id`.
+    /// Use this for fire-and-forget requests (e.g. heartbeat `public/test`)
+    /// that still expect a response — the response is consumed silently
+    /// instead of triggering a "no waiter for response" warning.
+    ExpectResponse(String, i64),
 }
 
 // ─── ProtocolHandler ─────────────────────────────────────────────────
@@ -195,14 +200,15 @@ impl ProtocolHandler {
     pub fn handle_notification(&self, method: &str, text: &str) -> Vec<OutgoingAction> {
         match method {
             "heartbeat" => {
+                let id = crate::jsonrpc::global_id_generator().next_id();
                 let test_payload = json!({
                     "jsonrpc": "2.0",
-                    "id": crate::jsonrpc::global_id_generator().next_id(),
+                    "id": id,
                     "method": "public/test",
                     "params": {}
                 })
                 .to_string();
-                vec![OutgoingAction::Send(test_payload)]
+                vec![OutgoingAction::ExpectResponse(test_payload, id)]
             }
             "subscription" => {
                 crate::metrics::DERIBIT_METRICS.sub_received.add(1, &[]);
@@ -294,11 +300,11 @@ mod tests {
         let text = r#"{"jsonrpc":"2.0","method":"heartbeat","params":{"type":"test_request"}}"#;
         let actions = handler.handle_notification("heartbeat", text);
         assert_eq!(actions.len(), 1);
-        match &actions[0] {
-            OutgoingAction::Send(payload) => {
-                assert!(payload.contains("public/test"));
-            }
-        }
+        let payload = match &actions[0] {
+            OutgoingAction::ExpectResponse(payload, _) => payload,
+            OutgoingAction::Send(payload) => payload,
+        };
+        assert!(payload.contains("public/test"));
     }
 
     #[test]

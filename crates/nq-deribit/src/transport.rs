@@ -147,43 +147,17 @@ impl Transport for WsTransportImpl {
             .as_mut()
             .ok_or(TransportError::NotConnected)?;
 
-        // ── Pong timeout check (warn only) ─────────────────────────
-        if let Some(last_pong) = self.last_pong {
-            if last_pong.elapsed() > self.pong_timeout {
-                warn!(
-                    connection_id = self.conn_id,
-                    elapsed_ms = last_pong.elapsed().as_millis(),
-                    timeout_ms = self.pong_timeout.as_millis(),
-                    "pong timeout — server may not support WS ping/pong"
-                );
-                // Reset to avoid log spam; server uses its own heartbeat
-                self.last_pong = Some(Instant::now());
-            }
-        }
-
-        // ── Read next message with internal ping timer ────────────
-        let mut next_ping = tokio::time::Instant::now() + self.ping_interval;
+        // ── Read next message (no proactive ping — Deribit uses
+        //    JSON-RPC heartbeat via public/set_heartbeat instead) ─────
         loop {
-            let message = tokio::select! {
-                msg = ws.next() => {
-                    match msg {
-                        Some(Ok(m)) => m,
-                        Some(Err(e)) => {
-                            return Err(TransportError::RecvFailed(e.into()));
-                        }
-                        None => {
-                            debug!(connection_id = self.conn_id, "ws stream ended");
-                            return Ok(None);
-                        }
-                    }
+            let message = match ws.next().await {
+                Some(Ok(m)) => m,
+                Some(Err(e)) => {
+                    return Err(TransportError::RecvFailed(e.into()));
                 }
-                _ = tokio::time::sleep_until(next_ping) => {
-                    trace!(connection_id = self.conn_id, "sending ping (internal timer)");
-                    if let Err(e) = ws.send(Message::Ping(Vec::new())).await {
-                        warn!(connection_id = self.conn_id, error = ?e, "failed to send ping");
-                    }
-                    next_ping = tokio::time::Instant::now() + self.ping_interval;
-                    continue;
+                None => {
+                    debug!(connection_id = self.conn_id, "ws stream ended");
+                    return Ok(None);
                 }
             };
 
@@ -204,10 +178,12 @@ impl Transport for WsTransportImpl {
                     if let Err(e) = ws.send(Message::Pong(data)).await {
                         warn!(connection_id = self.conn_id, error = ?e, "failed to send pong");
                     }
+                    // Continue waiting for next message
                 }
                 Message::Pong(_data) => {
                     trace!(connection_id = self.conn_id, "recv pong");
-                    self.last_pong = Some(Instant::now());
+                    // Deribit doesn't send unsolicited pongs; if we ever
+                    // get one, just ignore it — no internal ping to track.
                 }
                 Message::Close { code, reason } => {
                     let code_u16: u16 = code.into();
