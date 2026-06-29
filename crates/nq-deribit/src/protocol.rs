@@ -284,17 +284,14 @@ impl ProtocolHandler {
                     ]
                 }
                 "subscription" => {
-                    crate::metrics::DERIBIT_SUB_RECEIVED
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    crate::metrics::DERIBIT_METRICS.sub_received.add(1, &[]);
                     if let Some(tx) = &self.broadcast_tx {
                         match tx.send(text.to_string()) {
                             Ok(_) => {
-                                crate::metrics::DERIBIT_SUB_ENQUEUED
-                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                crate::metrics::DERIBIT_METRICS.sub_enqueued.add(1, &[]);
                             }
                             Err(_) => {
-                                crate::metrics::DERIBIT_SUB_DROPPED
-                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, &[]);
                             }
                         }
                     }
