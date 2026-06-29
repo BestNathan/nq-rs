@@ -8,7 +8,7 @@
       "id": 1,
       "title": "Deribit Sub Received / sec",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 7 },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -22,9 +22,9 @@
     },
     {
       "id": 2,
-      "title": "Deribit Sub Enqueued vs Dropped / sec",
+      "title": "Sub Enqueued vs Dropped / sec",
       "type": "timeseries",
-      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 7 },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -45,17 +45,17 @@
       "id": 3,
       "title": "MQTT Published vs Failed / sec",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 7 },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "rate(mqtt_published_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - published"
+          "legendFormat": "{{service_name}} - ok"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "rate(mqtt_publish_failed_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - failed"
+          "legendFormat": "{{service_name}} - fail"
         }
       ],
       "fieldConfig": {
@@ -64,24 +64,24 @@
     },
     {
       "id": 6,
-      "title": "Tokio Runtime",
+      "title": "Tokio Tasks & Queues",
       "type": "timeseries",
-      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 7, "w": 8, "h": 7 },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "tokio_active_tasks{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - active tasks"
+          "legendFormat": "{{service_name}} - active"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "tokio_global_queue_depth{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - queue depth"
+          "legendFormat": "{{service_name}} - global q"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "tokio_workers{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - workers"
+          "expr": "tokio_total_local_queue_depth{service_name=~\"deribit-.*\"}",
+          "legendFormat": "{{service_name}} - local q"
         }
       ],
       "fieldConfig": {
@@ -89,10 +89,120 @@
       }
     },
     {
+      "id": 7,
+      "title": "Tokio Workers & Blocking",
+      "type": "timeseries",
+      "gridPos": { "x": 8, "y": 7, "w": 8, "h": 7 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "tokio_workers{service_name=~\"deribit-.*\"}",
+          "legendFormat": "{{service_name}} - workers"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "tokio_blocking_threads{service_name=~\"deribit-.*\"}",
+          "legendFormat": "{{service_name}} - blocking active"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "tokio_idle_blocking_threads{service_name=~\"deribit-.*\"}",
+          "legendFormat": "{{service_name}} - blocking idle"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Tokio Poll & Steal / sec",
+      "type": "timeseries",
+      "gridPos": { "x": 16, "y": 7, "w": 8, "h": 7 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(tokio_total_polls_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - polls"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(tokio_total_steals_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - steals"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(tokio_total_overflows_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - overflows"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Tokio Mean Poll Duration (µs)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 14, "w": 8, "h": 7 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "tokio_mean_poll_us{service_name=~\"deribit-.*\"}",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "µs", "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Tokio I/O & Yields / sec",
+      "type": "timeseries",
+      "gridPos": { "x": 8, "y": 14, "w": 8, "h": 7 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(tokio_io_ready_events_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - io events"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(tokio_budget_yields_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - budget yields"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(tokio_total_noops_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}} - noops"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Tokio Busy Time / sec",
+      "type": "timeseries",
+      "gridPos": { "x": 16, "y": 14, "w": 8, "h": 7 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(tokio_total_busy_secs_total{service_name=~\"deribit-.*\"}[1m])",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
       "id": 4,
       "title": "Application Logs",
       "type": "logs",
-      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 21, "w": 12, "h": 8 },
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
@@ -104,7 +214,7 @@
       "id": 5,
       "title": "Traces",
       "type": "traces",
-      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 21, "w": 12, "h": 8 },
       "targets": [
         {
           "datasource": { "type": "tempo", "uid": "tempo" },
