@@ -27,16 +27,6 @@ spec:
               value: http://192.168.2.98:8890
             - name: DERIBIT_SUBSCRIPTION_CHANNELS_FILE
               value: /etc/deribit-subscription/channels.txt
-            - name: DERIBIT_API_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: deribit-subscription-secrets
-                  key: DERIBIT_CLIENT_ID
-            - name: DERIBIT_API_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: deribit-subscription-secrets
-                  key: DERIBIT_CLIENT_SECRET
           volumeMounts:
             - name: channels
               mountPath: /etc/deribit-subscription
