@@ -6,20 +6,14 @@ version = "0.1.0"
 [dependencies]
 anyhow = {workspace = true}
 async-trait = {workspace = true}
-flume = {workspace = true}
-futures-util = {workspace = true}
 nq-app = {workspace = true}
 nq-deribit = {workspace = true}
 nq-env = {workspace = true}
 nq-mqtt = {workspace = true}
-rand = "0.9.0"
-reqwest = {version = "0.12", default-features = false, features = ["rustls-tls", "json"]}
-reqwest-websocket = "0.4.4"
 rumqttc = "0.24.0"
 serde = {workspace = true}
 serde_json = {workspace = true}
 tokio = {workspace = true}
-tokio-tungstenite = "0.26.1"
 tokio-util = {workspace = true}
 tracing = {workspace = true}
 tracing-subscriber = {workspace = true}
