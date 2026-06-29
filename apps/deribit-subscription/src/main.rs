@@ -151,6 +151,7 @@ impl Runner for App {
 #[tokio::main]
 async fn main() -> Result<()> {
     let _guard = nq_observability::init_telemetry("deribit-subscription")?;
+    nq_observability::spawn_tokio_metrics(std::time::Duration::from_secs(15));
 
     let channels = resolve_channels();
 
