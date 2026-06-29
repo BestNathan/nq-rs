@@ -19,7 +19,7 @@ use ticker_router::TickerRouter;
 #[tokio::main]
 async fn main() -> Result<()> {
     let _guard = nq_observability::init_telemetry("deribit-option-monitor")?;
-    nq_observability::spawn_tokio_metrics(std::time::Duration::from_secs(15));
+    nq_observability::spawn_tokio_metrics();
 
     let config = AppConfig::from_env();
 

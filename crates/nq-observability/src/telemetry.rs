@@ -16,6 +16,14 @@ fn otlp_endpoint() -> String {
         .unwrap_or_else(|_| "http://otel-collector.observability:4317".into())
 }
 
+/// Initialize OpenTelemetry: traces, metrics, logs — all exported via OTLP gRPC.
+///
+/// - Log level is controlled by `RUST_LOG` env var (defaults to `info`).
+///   The same filter applies to console output AND OTel export — internal
+///   TRACE/DEBUG noise from tonic/h2/hyper is never sent to the collector.
+/// - Metrics export interval: `OTEL_METRICS_EXPORT_INTERVAL_SECS` (default 60s).
+///
+/// The returned `OTelGuard` must be kept alive for the lifetime of the process.
 pub fn init_telemetry(service_name: &str) -> Result<OTelGuard> {
     let endpoint = otlp_endpoint();
 
@@ -72,7 +80,13 @@ pub fn init_telemetry(service_name: &str) -> Result<OTelGuard> {
         )
         .build();
 
-    // ── tracing subscriber: fmt layer + OTel layers ──────────────────
+    // ── tracing subscriber ───────────────────────────────────────────
+    // Global filter from RUST_LOG (default info). Applied to ALL layers
+    // so internal TRACE/DEBUG from tonic/h2/opentelemetry_sdk stays out
+    // of both console and the OTel collector.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
     let otel_trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
     let otel_log_layer =
         opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
@@ -83,8 +97,9 @@ pub fn init_telemetry(service_name: &str) -> Result<OTelGuard> {
         .with(tracing_subscriber::fmt::layer())
         .with(otel_trace_layer)
         .with(otel_log_layer)
+        .with(filter)
         .try_init()
-        .ok(); // ignore if already initialized (tests may call multiple times)
+        .ok();
 
     Ok(OTelGuard {
         _meter_provider: meter_provider,

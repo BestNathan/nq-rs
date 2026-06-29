@@ -13,4 +13,4 @@ tokio = {workspace = true}
 tokio-metrics = "0.5"
 tracing = {workspace = true}
 tracing-opentelemetry = "0.29"
-tracing-subscriber = {workspace = true}
+tracing-subscriber = {workspace = true, features = ["env-filter"]}

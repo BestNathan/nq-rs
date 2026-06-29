@@ -3,9 +3,13 @@
 //! Spawn a background task that periodically collects [`RuntimeMetrics`]
 //! from the Tokio runtime and records them as OTel instruments.
 //!
+//! Collection interval is controlled by `TOKIO_METRICS_INTERVAL_SECS` env var
+//! (default 60s). Metrics are exported on the OTel SDK's own schedule — recording
+//! does NOT trigger immediate export; it updates the in-memory gauge/counter value.
+//!
 //! Requires `--cfg tokio_unstable` (set in `.cargo/config.toml`).
-//! All fields below come from `tokio-metrics` 0.5 `RuntimeMetrics`.
 
+use std::env;
 use std::time::Duration;
 
 use opentelemetry::metrics::Meter;
@@ -13,33 +17,20 @@ use tokio_metrics::RuntimeMonitor;
 
 use crate::metrics::meter;
 
-/// Spawn a background task that records Tokio runtime metrics at the given
-/// interval. Returns a [`tokio::task::JoinHandle`] that resolves when the
-/// task exits (which is never, unless the runtime shuts down).
+/// Spawn a background task that records Tokio runtime metrics.
 ///
-/// **Stable fields** (always available):
-/// - `tokio.active_tasks` (gauge) — number of currently live tasks
-/// - `tokio.global_queue_depth` (gauge) — tasks waiting in the global queue
-/// - `tokio.workers` (gauge) — number of worker threads
-///
-/// **Unstable fields** (require `tokio_unstable` cfg):
-/// - `tokio.total_busy_secs` (counter) — cumulative worker busy time
-/// - `tokio.total_polls` (counter) — cumulative task polls
-/// - `tokio.total_steals` (counter) — tasks stolen between workers
-/// - `tokio.total_overflows` (counter) — local queue overflow events
-/// - `tokio.total_noops` (counter) — false-positive wakeups
-/// - `tokio.total_local_queue_depth` (gauge) — current tasks in local queues
-/// - `tokio.budget_yields` (counter) — forced yields from exhausted budgets
-/// - `tokio.io_ready_events` (counter) — I/O driver ready events
-/// - `tokio.mean_poll_us` (histogram) — per-poll duration (EWMA, µs)
-/// - `tokio.blocking_queue_depth` (gauge) — tasks waiting in blocking pool
-/// - `tokio.blocking_threads` (gauge) — threads in blocking pool (active / idle)
-pub fn spawn_tokio_metrics(interval: Duration) -> tokio::task::JoinHandle<()> {
+/// Interval: `TOKIO_METRICS_INTERVAL_SECS` env var, default 60s.
+/// Returns a [`tokio::task::JoinHandle`] that resolves on shutdown.
+pub fn spawn_tokio_metrics() -> tokio::task::JoinHandle<()> {
+    let interval_secs: u64 = env::var("TOKIO_METRICS_INTERVAL_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(60);
     let handle = tokio::runtime::Handle::current();
     let monitor = RuntimeMonitor::new(&handle);
     let m = meter("tokio");
 
-    record_metrics(monitor, m, interval)
+    record_metrics(monitor, m, Duration::from_secs(interval_secs))
 }
 
 fn record_metrics(
@@ -61,7 +52,7 @@ fn record_metrics(
         .with_description("Number of worker threads")
         .build();
 
-    // ── Counters (cumulative, split into separate instruments) ───────
+    // ── Counters ─────────────────────────────────────────────────────
     let busy_secs = m
         .f64_counter("tokio.total_busy_secs")
         .with_description("Cumulative busy duration across all workers (seconds)")
@@ -117,12 +108,10 @@ fn record_metrics(
 
     tokio::spawn(async move {
         for metrics in monitor.intervals() {
-            // Stable
             active_tasks.record(metrics.live_tasks_count as u64, &[]);
             global_queue_depth.record(metrics.global_queue_depth as u64, &[]);
             workers.record(metrics.workers_count as u64, &[]);
 
-            // Counters
             busy_secs.add(metrics.total_busy_duration.as_secs_f64(), &[]);
             total_polls.add(metrics.total_polls_count, &[]);
             total_steals.add(metrics.total_steal_count, &[]);
@@ -131,13 +120,11 @@ fn record_metrics(
             budget_yields.add(metrics.budget_forced_yield_count, &[]);
             io_events.add(metrics.io_driver_ready_count, &[]);
 
-            // Gauges
             local_queue_depth.record(metrics.total_local_queue_depth as u64, &[]);
             blocking_queue_depth.record(metrics.blocking_queue_depth as u64, &[]);
             blocking_threads.record(metrics.blocking_threads_count as u64, &[]);
             idle_blocking_threads.record(metrics.idle_blocking_threads_count as u64, &[]);
 
-            // Histogram
             mean_poll_us.record(metrics.mean_poll_duration.as_micros() as f64, &[]);
 
             tokio::time::sleep(interval).await;
@@ -151,7 +138,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_tokio_metrics_compiles() {
-        let handle = spawn_tokio_metrics(Duration::from_secs(15));
+        // Uses default 60s interval when env is not set.
+        let handle = spawn_tokio_metrics();
         handle.abort();
     }
 }
