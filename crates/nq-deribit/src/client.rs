@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use crate::request::authentication::AuthRequest;
 use crate::request::session_management::SetHeartbeatRequest;
 use crate::request::subscribe::{PrivateSubscribeRequest, PublicSubscribeRequest};
@@ -19,6 +21,7 @@ use tokio::{select, sync::oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
+#[deprecated(note = "Use Connection + ConnectionPool instead. See connection.rs and pool.rs for the new multi-connection architecture.")]
 pub struct Client {
     config: Arc<Config>,
     token: Arc<RwLock<Option<String>>>,

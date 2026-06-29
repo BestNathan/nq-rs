@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -14,6 +16,7 @@ use crate::{
     request::Request,
 };
 
+#[deprecated(note = "DeribitApiClient is internal to the legacy Client. Use Connection::call_api for channel-based API calls or ProtocolHandler for direct transport calls.")]
 pub struct DeribitApiClient {
     token: Arc<RwLock<Option<String>>>,
     payload_tx: Sender<String>,
