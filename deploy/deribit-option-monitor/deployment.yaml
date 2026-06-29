@@ -21,16 +21,6 @@ spec:
           env:
             - name: RUST_LOG
               value: info
-            - name: DERIBIT_API_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: option-monitor-secrets
-                  key: DERIBIT_CLIENT_ID
-            - name: DERIBIT_API_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: option-monitor-secrets
-                  key: DERIBIT_CLIENT_SECRET
             - name: EMQX_HOST
               value: emqx-prod-nodeport.emqx.svc.cluster.local
             - name: ALL_PROXY
