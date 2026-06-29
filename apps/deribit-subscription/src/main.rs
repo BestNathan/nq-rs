@@ -82,12 +82,13 @@ struct App {
     mqtt_async_client: Option<AsyncClient>,
     pool: Arc<ConnectionPool>,
     dry_run: bool,
+    topic: String,
 }
 
 #[async_trait]
 impl Runner for App {
     async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
-        let topic = deribit_subscription_topic();
+        let topic = self.topic.clone();
         let mut sub_rx = self.pool.subscribe_to_broadcast();
 
         if self.dry_run {
@@ -197,6 +198,9 @@ async fn main() -> Result<()> {
     info!(count = channels.len(), "subscribing to channels");
     pool.subscribe(channels).await?;
 
+    // ── Resolve subscription topic (computed once at startup) ──────
+    let topic = deribit_subscription_topic();
+
     // ── Create MQTT client (or skip in DRY_RUN) ────────────────────
     let (mqtt_client, mqtt_async_client) = if dry_run {
         (None, None)
@@ -220,9 +224,10 @@ async fn main() -> Result<()> {
         mqtt_async_client,
         pool,
         dry_run,
+        topic,
     }));
 
-    let canceltoken = CancellationToken::new();
+    let canceltoken = ct;
     application.run(canceltoken).await;
 
     Ok(())
