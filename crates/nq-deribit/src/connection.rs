@@ -9,18 +9,86 @@ use flume::{Receiver, Sender};
 use reqwest::Proxy;
 use tokio::select;
 use tokio::sync::oneshot;
-use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::jsonrpc::{JSPNRPCRequest, JSONRPCResponse};
-use crate::protocol::{ProtocolEvent, ProtocolHandler};
+use crate::protocol::{JsonRpcCaller, OutgoingAction, ProtocolHandler};
 use crate::request::Request;
-use crate::transport::{Transport, TransportError, WsTransportImpl};
+use crate::transport::{Transport, WsTransportImpl};
 
 /// WebSocket-level ping interval (seconds). Sends a Ping frame at this interval
 /// to keep the connection alive and detect dead connections early.
 const PING_INTERVAL_SECS: u64 = 15;
+
+// ─── SetupCaller ──────────────────────────────────────────────────────
+
+/// Implements JsonRpcCaller via direct transport access.
+/// Used during the setup phase before the main select! eventloop starts.
+struct SetupCaller<'a> {
+    transport: &'a mut (dyn Transport + 'a),
+}
+
+#[async_trait]
+impl JsonRpcCaller for SetupCaller<'_> {
+    async fn call(&mut self, payload: &str, timeout: Duration) -> Result<String> {
+        let id = {
+            let value: serde_json::Value = serde_json::from_str(payload)
+                .with_context(|| "SetupCaller: invalid JSON")?;
+            value
+                .get("id")
+                .and_then(|v| v.as_i64())
+                .with_context(|| "SetupCaller: missing id")?
+        };
+
+        self.transport
+            .send(payload.to_string())
+            .await
+            .with_context(|| "SetupCaller: send")?;
+
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let remaining =
+                deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(anyhow::Error::from(
+                    crate::errors::DeribitError::RequestTimeout,
+                ));
+            }
+
+            let result = tokio::time::timeout(remaining, self.transport.recv())
+                .await
+                .map_err(|_| {
+                    anyhow::Error::from(crate::errors::DeribitError::RequestTimeout)
+                })?;
+
+            let text = match result {
+                Ok(Some(t)) => t,
+                Ok(None) => {
+                    return Err(anyhow::anyhow!(
+                        "SetupCaller: transport closed"
+                    ))
+                }
+                Err(e) => {
+                    return Err(anyhow::Error::new(e)
+                        .context("SetupCaller: transport error"))
+                }
+            };
+
+            let value: serde_json::Value = serde_json::from_str(&text)
+                .with_context(|| "SetupCaller: invalid JSON response")?;
+
+            if let Some(resp_id) = value.get("id").and_then(|v| v.as_i64()) {
+                if resp_id == id {
+                    return Ok(text);
+                }
+            }
+            // Non-matching messages (notifications) are discarded during setup.
+            // This is acceptable because setup runs before any subscriptions
+            // are active.
+        }
+    }
+}
 
 // ─── Connection ──────────────────────────────────────────────────────
 
@@ -366,7 +434,10 @@ impl Connection {
             debug!(connection_id = self.id, "transport connected");
 
             // ── Layer 2: Synchronous setup ───────────────────────────
-            match protocol.run_setup(&mut transport).await {
+            let mut setup_caller = SetupCaller {
+                transport: &mut transport,
+            };
+            match protocol.run_setup(&mut setup_caller).await {
                 Ok(()) => {
                     setup_backoff_secs = 5; // reset on success
                 }
@@ -397,9 +468,7 @@ impl Connection {
             // ── Main eventloop ───────────────────────────────────────
             let mut responser_map: HashMap<i64, oneshot::Sender<String>> =
                 HashMap::new();
-            let mut message_map: HashMap<i64, String> = HashMap::new();
             const MAX_MAP_SIZE: usize = 1000;
-            let mut next_ping = tokio::time::Instant::now() + ping_interval;
 
             loop {
                 select! {
@@ -409,22 +478,18 @@ impl Connection {
                         return Ok(());
                     }
 
-                    // ── Layer 3: API response routing ─────────────────
+                    // ── API response routing ─────────────────────────
                     Ok((id, responser)) = self.responser_rx.recv_async() => {
-                        if let Some(text) = message_map.remove(&id) {
-                            let _ = responser.send(text);
-                        } else {
-                            if responser_map.len() >= MAX_MAP_SIZE {
-                                warn!(connection_id = self.id,
-                                    map_size = responser_map.len(),
-                                    "responser_map too large, clearing");
-                                responser_map.clear();
-                            }
-                            responser_map.insert(id, responser);
+                        if responser_map.len() >= MAX_MAP_SIZE {
+                            warn!(connection_id = self.id,
+                                map_size = responser_map.len(),
+                                "responser_map too large, clearing");
+                            responser_map.clear();
                         }
+                        responser_map.insert(id, responser);
                     }
 
-                    // ── Layer 3 → 1: Outgoing API message ─────────────
+                    // ── Outgoing API message ─────────────────────────
                     msg = self.message_rx.recv_async() => {
                         let msg = msg.with_context(|| "connection recv message")?;
                         if let Err(e) = transport.send(msg).await {
@@ -435,17 +500,12 @@ impl Connection {
                         }
                     }
 
-                    // ── Layer 1 → 2: Incoming message ─────────────────
+                    // ── Incoming message dispatch ────────────────────
                     result = transport.recv() => {
                         let text = match result {
                             Ok(Some(t)) => t,
                             Ok(None) => {
                                 debug!(connection_id = self.id, "transport closed");
-                                break;
-                            }
-                            Err(TransportError::PongTimeout) => {
-                                warn!(connection_id = self.id,
-                                    "pong timeout, reconnecting");
                                 break;
                             }
                             Err(e) => {
@@ -456,53 +516,76 @@ impl Connection {
                             }
                         };
 
-                        // Layer 2: Dispatch message
-                        let events = protocol.handle_message(&text);
-                        for event in events {
-                            match event {
-                                ProtocolEvent::RouteResponse(id, response_text) => {
-                                    if let Some(responser) =
-                                        responser_map.remove(&id)
-                                    {
-                                        let _ = responser.send(response_text);
-                                    } else {
-                                        if message_map.len() >= MAX_MAP_SIZE {
+                        // Classify: response (has "id") vs notification (has "method")
+                        let value: serde_json::Value = match serde_json::from_str(&text) {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
+
+                        if let Some(id) = value.get("id").and_then(|v| v.as_i64()) {
+                            // JSON-RPC response → route to waiting caller
+                            if let Some(responser) = responser_map.remove(&id) {
+                                let _ = responser.send(text);
+                            } else {
+                                warn!(connection_id = self.id, id, "no waiter for response");
+                            }
+                        } else if let Some(method) = value.get("method").and_then(|v| v.as_str()) {
+                            // JSON-RPC notification → dispatch to Protocol handler
+                            let actions = protocol.handle_notification(method, &text);
+                            for action in actions {
+                                match action {
+                                    OutgoingAction::Send(payload) => {
+                                        if let Err(e) = transport.send(payload).await {
                                             warn!(connection_id = self.id,
-                                                map_size = message_map.len(),
-                                                "message_map too large, clearing");
-                                            message_map.clear();
+                                                error = ?e,
+                                                "transport send (notification response) failed");
                                         }
-                                        message_map.insert(id, response_text);
                                     }
-                                }
-                                ProtocolEvent::Send(payload) => {
-                                    if let Err(e) = transport.send(payload).await {
-                                        warn!(connection_id = self.id,
-                                            error = ?e,
-                                            "transport send (from protocol) failed");
-                                    }
-                                }
-                                ProtocolEvent::HeartbeatDetected => {
-                                    // handled by protocol (metrics + test response)
                                 }
                             }
+                        } else {
+                            warn!(connection_id = self.id, "unrecognized message (no id or method)");
                         }
-                    }
-
-                    // ── Layer 1: Ping timer ───────────────────────────
-                    _ = tokio::time::sleep_until(next_ping) => {
-                        if let Err(e) = transport.send_ping().await {
-                            warn!(connection_id = self.id,
-                                error = ?e,
-                                "ping send failed, reconnecting");
-                            break;
-                        }
-                        next_ping = Instant::now() + ping_interval;
                     }
                 }
             }
             // Inner loop break → reconnect
         }
+    }
+}
+
+#[async_trait]
+impl JsonRpcCaller for Connection {
+    async fn call(&mut self, payload: &str, timeout: Duration) -> Result<String> {
+        // Extract id from the JSON-RPC payload for correlation
+        let value: serde_json::Value = serde_json::from_str(payload)
+            .with_context(|| "JsonRpcCaller: invalid JSON payload")?;
+        let id = value
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .with_context(|| "JsonRpcCaller: payload missing 'id'")?;
+
+        let (responser_tx, responser_rx) = oneshot::channel();
+
+        self.message_tx
+            .send_async(payload.to_string())
+            .await
+            .with_context(|| "JsonRpcCaller: send payload")?;
+
+        self.responser_tx
+            .send_async((id, responser_tx))
+            .await
+            .with_context(|| "JsonRpcCaller: register responser")?;
+
+        let resp = tokio::time::timeout(timeout, responser_rx)
+            .await
+            .map_err(|_| {
+                anyhow::Error::from(crate::errors::DeribitError::RequestTimeout)
+            })
+            .with_context(|| "JsonRpcCaller: timeout")?
+            .with_context(|| "JsonRpcCaller: responser dropped")?;
+
+        Ok(resp)
     }
 }
 
