@@ -1,6 +1,7 @@
 use flume::{Receiver, RecvError};
 use futures_util::Stream;
 
+#[deprecated(note = "Use ConnectionPool::subscribe_to_broadcast() instead. DeribitSubscriptionClient is only used by the deprecated Client.")]
 #[derive(Clone)]
 pub struct DeribitSubscriptionClient {
     rx: Receiver<String>,
