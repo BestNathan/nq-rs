@@ -32,7 +32,7 @@ spec:
                   name: option-monitor-secrets
                   key: DERIBIT_CLIENT_SECRET
             - name: EMQX_HOST
-              value: emqx-nodeport.emqx.svc.cluster.local
+              value: emqx-prod-nodeport.emqx.svc.cluster.local
             - name: ALL_PROXY
               value: http://192.168.2.98:8890
             - name: HTTPS_PROXY
