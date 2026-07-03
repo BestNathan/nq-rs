@@ -137,9 +137,7 @@ impl ConnectionPool {
         // Phase 2: Spawn subscribe tasks for all assignments
         let mut handles = Vec::new();
         for (conn, batch) in assignments {
-            handles.push(tokio::spawn(async move {
-                conn.subscribe(batch).await
-            }));
+            handles.push(tokio::spawn(async move { conn.subscribe(batch).await }));
         }
 
         // Phase 3: Await all spawned tasks; first error propagates
@@ -392,7 +390,7 @@ mod tests {
         let conns = pool.connection_runners();
         assert_eq!(conns.len(), 2, "100 + 150 = 250, needs 2 connections with cap=200");
         assert_eq!(conns[0].channel_count(), 200); // first conn filled to capacity
-        assert_eq!(conns[1].channel_count(), 50);  // rest on new connection
+        assert_eq!(conns[1].channel_count(), 50); // rest on new connection
     }
 
     /// Multiple rounds of subscribe correctly fill connections.
@@ -403,9 +401,9 @@ mod tests {
             connection_config: test_config(),
         });
 
-        let _ = pool.subscribe(channels_from(0, 150)).await;    // conn0: 150
-        let _ = pool.subscribe(channels_from(150, 100)).await;  // conn0: +50=200, conn1: 50
-        let _ = pool.subscribe(channels_from(250, 300)).await;  // conn1: +150=200, conn2: 150
+        let _ = pool.subscribe(channels_from(0, 150)).await; // conn0: 150
+        let _ = pool.subscribe(channels_from(150, 100)).await; // conn0: +50=200, conn1: 50
+        let _ = pool.subscribe(channels_from(250, 300)).await; // conn1: +150=200, conn2: 150
 
         let conns = pool.connection_runners();
         assert_eq!(conns.len(), 3, "150+100+300=550, ceil(550/200)=3");

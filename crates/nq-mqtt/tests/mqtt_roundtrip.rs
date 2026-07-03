@@ -22,9 +22,7 @@ async fn test_subscribe_to_option_tickers() -> anyhow::Result<()> {
     let (client, mut eventloop) = AsyncClient::new(options, 100);
 
     // Subscribe to all option tickers
-    client
-        .subscribe(TOPIC, QoS::AtLeastOnce)
-        .await?;
+    client.subscribe(TOPIC, QoS::AtLeastOnce).await?;
     println!("Subscribed to: {}", TOPIC);
 
     // Collect messages for up to 30 seconds
@@ -37,10 +35,8 @@ async fn test_subscribe_to_option_tickers() -> anyhow::Result<()> {
             Ok(Ok(Event::Incoming(Packet::Publish(publish)))) => {
                 let topic = publish.topic.clone();
                 let payload: Value = serde_json::from_slice(&publish.payload)?;
-                let instrument = payload
-                    .get("instrument_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
+                let instrument =
+                    payload.get("instrument_name").and_then(|v| v.as_str()).unwrap_or("unknown");
 
                 topic_set.insert(topic);
                 messages.push((instrument.to_string(), payload));
@@ -74,10 +70,7 @@ async fn test_subscribe_to_option_tickers() -> anyhow::Result<()> {
         for (instrument, payload) in messages.iter().take(5) {
             let best_bid = payload.get("best_bid_price").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let best_ask = payload.get("best_ask_price").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            println!(
-                "  {}: bid={:.4}, ask={:.4}",
-                instrument, best_bid, best_ask
-            );
+            println!("  {}: bid={:.4}, ask={:.4}", instrument, best_bid, best_ask);
         }
     }
 

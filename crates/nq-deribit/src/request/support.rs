@@ -1,16 +1,8 @@
 use crate::impl_request;
 use serde::{Deserialize, Serialize};
 
-impl_request!(
-    HelloRequest,
-    HelloResponse,
-    "public/hello"
-);
-impl_request!(
-    TestRequest,
-    TestResponse,
-    "public/test"
-);
+impl_request!(HelloRequest, HelloResponse, "public/hello");
+impl_request!(TestRequest, TestResponse, "public/test");
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct HelloRequest {
@@ -35,9 +27,7 @@ impl TestRequest {
     }
 
     pub fn expect(result: &str) -> Self {
-        Self {
-            expected_result: Some(result.into()),
-        }
+        Self { expected_result: Some(result.into()) }
     }
 }
 

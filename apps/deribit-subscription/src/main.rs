@@ -20,14 +20,11 @@ const DERIBIT_API_CLIENT_SECRET_ENV: &str = "DERIBIT_API_CLIENT_SECRET";
 const DRY_RUN_ENV: &str = "DRY_RUN";
 
 fn deribit_subscription_topic() -> String {
-    env::var(DERIBIT_SUBSCRIPTION_TOPIC_ENV)
-        .unwrap_or(DERIBIT_SUBSCRIPTION_TOPIC.to_string())
+    env::var(DERIBIT_SUBSCRIPTION_TOPIC_ENV).unwrap_or(DERIBIT_SUBSCRIPTION_TOPIC.to_string())
 }
 
 fn is_dry_run() -> bool {
-    env::var(DRY_RUN_ENV)
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false)
+    env::var(DRY_RUN_ENV).map(|v| v == "true" || v == "1").unwrap_or(false)
 }
 
 /// Resolve subscription channels using priority:
@@ -56,22 +53,16 @@ fn resolve_channels() -> Vec<String> {
     }
 
     if let Ok(list) = env::var(DERIBIT_SUBSCRIPTION_CHANNELS_ENV) {
-        let channels: Vec<String> = list
-            .split(',')
-            .map(|v| v.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let channels: Vec<String> =
+            list.split(',').map(|v| v.trim().to_string()).filter(|s| !s.is_empty()).collect();
         if !channels.is_empty() {
             info!(count = channels.len(), "channels from env var");
             return channels;
         }
     }
 
-    let channels: Vec<String> = SUBSCRIPTION
-        .lines()
-        .map(|v| v.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let channels: Vec<String> =
+        SUBSCRIPTION.lines().map(|v| v.trim().to_string()).filter(|s| !s.is_empty()).collect();
     info!(count = channels.len(), "channels from default subscription.txt");
     channels
 }
@@ -165,11 +156,7 @@ async fn main() -> Result<()> {
         info!("DRY_RUN mode: MQTT publish disabled, logging subscriptions to stdout");
     }
 
-    info!(
-        "deribit subscriptions ({} channels): {}",
-        channels.len(),
-        channels.join(", ")
-    );
+    info!("deribit subscriptions ({} channels): {}", channels.len(), channels.join(", "));
 
     // ── Build ConnectionConfig with optional auth ──────────────────
     let conn_config = ConnectionConfigBuilder::default()
@@ -204,9 +191,7 @@ async fn main() -> Result<()> {
     let (mqtt_client, mqtt_async_client) = if dry_run {
         (None, None)
     } else {
-        let mqtt_client = nq_mqtt::client::Client::builder()
-            .set_host(nq_env::emqx::host())
-            .build();
+        let mqtt_client = nq_mqtt::client::Client::builder().set_host(nq_env::emqx::host()).build();
         let inner = mqtt_client.inner();
         (Some(mqtt_client), Some(inner))
     };
@@ -219,12 +204,7 @@ async fn main() -> Result<()> {
         application.add_runner(Arc::new(mqtt));
     }
 
-    application.add_runner(Arc::new(App {
-        mqtt_async_client,
-        pool,
-        dry_run,
-        topic,
-    }));
+    application.add_runner(Arc::new(App { mqtt_async_client, pool, dry_run, topic }));
 
     let canceltoken = ct;
     application.run(canceltoken).await;

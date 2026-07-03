@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    gen_channel,
     model::{
         currency::Currency,
         direction::Direction,
@@ -8,7 +9,6 @@ use crate::{
         interval::Interval,
         order::{OrderState, OrderTrigger, OrderType, TimeInForce},
     },
-    gen_channel,
 };
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -43,21 +43,8 @@ pub struct UserOrdersData {
     pub web: bool,
 }
 
-gen_channel!(
-    UserOrdersByInstrumentChannel,
-    "user",
-    "orders",
-    String,
-    Interval
-);
-gen_channel!(
-    UserOrdersByKindChannel,
-    "user",
-    "orders",
-    InstrumentKind,
-    Currency,
-    Interval
-);
+gen_channel!(UserOrdersByInstrumentChannel, "user", "orders", String, Interval);
+gen_channel!(UserOrdersByKindChannel, "user", "orders", InstrumentKind, Currency, Interval);
 
 impl std::fmt::Display for UserOrdersByInstrumentChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

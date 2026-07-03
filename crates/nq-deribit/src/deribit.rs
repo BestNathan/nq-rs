@@ -1,4 +1,1 @@
-
-pub struct Deribit {
-    
-}
+pub struct Deribit {}

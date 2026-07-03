@@ -16,12 +16,15 @@ pub struct Application {
     runners: RefCell<Vec<Arc<dyn Runner>>>,
 }
 
+impl Default for Application {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Application {
     pub fn new() -> Self {
-        Self {
-            runners: Vec::new().into(),
-            task_tracker: TaskTracker::new(),
-        }
+        Self { runners: Vec::new().into(), task_tracker: TaskTracker::new() }
     }
 
     pub fn add_runner(&self, r: Arc<dyn Runner>) {
@@ -96,7 +99,7 @@ mod tests {
     use anyhow::Result;
     use async_trait::async_trait;
     use std::time::Duration;
-    use tokio::time::{sleep, Instant};
+    use tokio::time::{Instant, sleep};
     use tracing::info;
 
     #[tokio::test]

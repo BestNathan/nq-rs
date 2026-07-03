@@ -1,11 +1,11 @@
-use serde::{Deserialize, Serialize};
 use crate::{
+    gen_channel,
     model::{
         currency::Currency,
         instrument::{InstrumentKind, InstrumentState},
     },
-    gen_channel,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct InstrumentStateData {
@@ -34,7 +34,8 @@ mod tests {
 
     #[test]
     fn test_channel_deserialize() {
-        let ch: InstrumentStateChannel = serde_json::from_str("\"instrument_state.option.ETH\"").unwrap();
+        let ch: InstrumentStateChannel =
+            serde_json::from_str("\"instrument_state.option.ETH\"").unwrap();
         assert_eq!(ch.0, InstrumentKind::Option);
         assert_eq!(ch.1, Currency::ETH);
     }

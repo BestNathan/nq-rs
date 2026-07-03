@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use flume::Sender;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::{sync::oneshot, time::timeout};
 use tracing::debug;
 
@@ -16,7 +16,9 @@ use crate::{
     request::Request,
 };
 
-#[deprecated(note = "DeribitApiClient is internal to the legacy Client. Use Connection::call_api for channel-based API calls or ProtocolHandler for direct transport calls.")]
+#[deprecated(
+    note = "DeribitApiClient is internal to the legacy Client. Use Connection::call_api for channel-based API calls or ProtocolHandler for direct transport calls."
+)]
 pub struct DeribitApiClient {
     token: Arc<RwLock<Option<String>>>,
     payload_tx: Sender<String>,
@@ -31,12 +33,7 @@ impl DeribitApiClient {
         responser_tx: Sender<(i64, oneshot::Sender<String>)>,
         timeout: Duration,
     ) -> Self {
-        Self {
-            token,
-            payload_tx,
-            responser_tx,
-            timeout,
-        }
+        Self { token, payload_tx, responser_tx, timeout }
     }
 
     pub async fn call_raw<R>(&self, request: R) -> Result<JSONRPCResponse<R::Response>>
@@ -94,18 +91,12 @@ impl DeribitApiClient {
     where
         R: Request,
     {
-        let resp = self
-            .call_raw(request)
-            .await
-            .with_context(|| "deribit api client call raw")?;
+        let resp = self.call_raw(request).await.with_context(|| "deribit api client call raw")?;
 
-        match resp.result.map_right(|e| {
-            DeribitError::RemoteError {
-                code: e.code,
-                message: e.message,
-            }
-                .into()
-        }) {
+        match resp
+            .result
+            .map_right(|e| DeribitError::RemoteError { code: e.code, message: e.message }.into())
+        {
             either::Either::Left(v) => Ok(v),
             either::Either::Right(e) => Err(e),
         }

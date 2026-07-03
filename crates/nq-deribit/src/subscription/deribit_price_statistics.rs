@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{model::index::IndexName, gen_channel};
+use crate::{gen_channel, model::index::IndexName};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct DeribitPriceStatisticsData {
@@ -12,11 +12,7 @@ pub struct DeribitPriceStatisticsData {
     pub weight: f64,
 }
 
-gen_channel!(
-    DeribitPriceStatisticsChannel,
-    "deribit_price_statistics",
-    IndexName
-);
+gen_channel!(DeribitPriceStatisticsChannel, "deribit_price_statistics", IndexName);
 
 impl std::fmt::Display for DeribitPriceStatisticsChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -22,7 +22,7 @@ async fn start(config: CustomConfig, producer: TopicProducerPool) -> Result<()> 
     let sql = format!("select row_to_json(r) from ({}) r", &config.query);
 
     let mut rows = sqlx::query(&sql).fetch(&pool);
-    
+
     while let Some(row) = rows.try_next().await? {
         let value: Value = row.try_get("row_to_json").unwrap();
         debug!("json: {}", value);

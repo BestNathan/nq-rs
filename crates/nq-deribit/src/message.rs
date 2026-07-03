@@ -49,11 +49,15 @@ pub struct MessageAssembler {
     counter: Arc<Mutex<i64>>,
 }
 
+impl Default for MessageAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageAssembler {
     pub fn new() -> Self {
-        MessageAssembler {
-            counter: Mutex::new(0).into(),
-        }
+        MessageAssembler { counter: Mutex::new(0).into() }
     }
 
     fn id(&self) -> i64 {

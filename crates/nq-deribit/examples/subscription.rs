@@ -12,10 +12,8 @@ use tracing::info;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let channels: Vec<String> = vec![
-        "trades.future.BTC.agg2".to_string(),
-        "trades.option.BTC.agg2".to_string(),
-    ];
+    let channels: Vec<String> =
+        vec!["trades.future.BTC.agg2".to_string(), "trades.option.BTC.agg2".to_string()];
 
     let conn_config = ConnectionConfigBuilder::default().build()?;
     let pool = Arc::new(ConnectionPool::new(PoolConfig {

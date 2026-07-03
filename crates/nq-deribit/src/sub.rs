@@ -1,22 +1,25 @@
 use flume::{Receiver, RecvError};
 use futures_util::Stream;
 
-#[deprecated(note = "Use ConnectionPool::subscribe_to_broadcast() instead. DeribitSubscriptionClient is only used by the deprecated Client.")]
+#[deprecated(
+    note = "Use ConnectionPool::subscribe_to_broadcast() instead. DeribitSubscriptionClient is only used by the deprecated Client."
+)]
 #[derive(Clone)]
 pub struct DeribitSubscriptionClient {
     rx: Receiver<String>,
 }
 
+#[allow(deprecated)]
 impl DeribitSubscriptionClient {
     pub(crate) fn new(rx: Receiver<String>) -> Self {
         Self { rx }
     }
 
-    pub fn recv(&self) -> impl Future<Output=Result<String, RecvError>> {
+    pub fn recv(&self) -> impl Future<Output = Result<String, RecvError>> {
         self.rx.recv_async()
     }
 
-    pub fn stream(&self) -> impl Stream<Item=String> {
+    pub fn stream(&self) -> impl Stream<Item = String> {
         self.rx.stream()
     }
 }

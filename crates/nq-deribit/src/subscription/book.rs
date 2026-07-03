@@ -96,14 +96,7 @@ impl Display for BookGroup {
     }
 }
 
-gen_channel!(
-    GroupedBookChannel,
-    "book",
-    String,
-    BookGroup,
-    String,
-    Interval
-);
+gen_channel!(GroupedBookChannel, "book", String, BookGroup, String, Interval);
 
 impl std::fmt::Display for GroupedBookChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -122,10 +115,7 @@ mod tests {
     #[test]
     fn test_channel() {
         let book_channel = BookChannel("BTC".to_owned(), Interval::Raw);
-        println!(
-            "book channel serde_json: {}",
-            serde_json::to_string(&book_channel).unwrap()
-        );
+        println!("book channel serde_json: {}", serde_json::to_string(&book_channel).unwrap());
 
         #[derive(Serialize, Deserialize)]
         struct Test {
@@ -133,10 +123,7 @@ mod tests {
             data: String,
         }
 
-        let test = Test {
-            channel: book_channel,
-            data: String::from("data"),
-        };
+        let test = Test { channel: book_channel, data: String::from("data") };
 
         println!("test struct: {}", serde_json::to_string(&test).unwrap());
     }

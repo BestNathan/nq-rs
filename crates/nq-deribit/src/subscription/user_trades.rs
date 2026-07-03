@@ -91,15 +91,8 @@ pub struct UserTradesData {
 
 #[derive(Debug, Clone)]
 pub enum UserTradesChannel {
-    ByInstrument {
-        instrument_name: String,
-        interval: String,
-    },
-    ByKind {
-        kind: String,
-        currency: String,
-        interval: String,
-    },
+    ByInstrument { instrument_name: String, interval: String },
+    ByKind { kind: String, currency: String, interval: String },
 }
 
 impl<'de> Deserialize<'de> for UserTradesChannel {
@@ -138,15 +131,10 @@ impl Serialize for UserTradesChannel {
 impl std::fmt::Display for UserTradesChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UserTradesChannel::ByInstrument {
-                instrument_name,
-                interval,
-            } => write!(f, "user.trades.{}.{}", instrument_name, interval),
-            UserTradesChannel::ByKind {
-                kind,
-                currency,
-                interval,
-            } => {
+            UserTradesChannel::ByInstrument { instrument_name, interval } => {
+                write!(f, "user.trades.{}.{}", instrument_name, interval)
+            }
+            UserTradesChannel::ByKind { kind, currency, interval } => {
                 write!(f, "user.trades.{}.{}.{}", kind, currency, interval)
             }
         }

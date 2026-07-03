@@ -2,12 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::impl_request;
 
-impl_request!(
-    GetOrderBookRequest,
-    GetOrderBookResponse,
-    "public/get_order_book",
-    false
-);
+impl_request!(GetOrderBookRequest, GetOrderBookResponse, "public/get_order_book", false);
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct GetOrderBookRequest {
@@ -18,16 +13,10 @@ pub struct GetOrderBookRequest {
 
 impl GetOrderBookRequest {
     pub fn new(instrument_name: &str) -> Self {
-        Self {
-            instrument_name: instrument_name.to_string(),
-            ..Default::default()
-        }
+        Self { instrument_name: instrument_name.to_string(), ..Default::default() }
     }
     pub fn with_depth(instrument_name: &str, depth: u64) -> Self {
-        Self {
-            instrument_name: instrument_name.to_string(),
-            depth: Some(depth),
-        }
+        Self { instrument_name: instrument_name.to_string(), depth: Some(depth) }
     }
 }
 
@@ -37,11 +26,7 @@ pub struct GetOrderBookResponse(Vec<()>);
 use crate::model::currency::Currency;
 use crate::model::instrument::{InstrumentInfo, InstrumentKind};
 
-impl_request!(
-    GetInstrumentsRequest,
-    GetInstrumentsResponse,
-    "public/get_instruments"
-);
+impl_request!(GetInstrumentsRequest, GetInstrumentsResponse, "public/get_instruments");
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct GetInstrumentsRequest {
@@ -54,11 +39,7 @@ pub struct GetInstrumentsRequest {
 
 impl GetInstrumentsRequest {
     pub fn options(currency: Currency) -> Self {
-        Self {
-            currency,
-            kind: Some(InstrumentKind::Option),
-            expired: Some(false),
-        }
+        Self { currency, kind: Some(InstrumentKind::Option), expired: Some(false) }
     }
 }
 

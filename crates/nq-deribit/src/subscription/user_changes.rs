@@ -1,8 +1,8 @@
 use crate::{
+    gen_channel,
     model::{
         currency::Currency, direction::Direction, instrument::InstrumentKind, interval::Interval,
     },
-    gen_channel,
 };
 
 use serde::{Deserialize, Serialize};
@@ -42,14 +42,7 @@ pub struct UserPositionsData {
 }
 
 gen_channel!(UserChangesByInstrument, "user", "changes", String, Interval);
-gen_channel!(
-    UserChangesByKind,
-    "user",
-    "changes",
-    InstrumentKind,
-    Currency,
-    Interval
-);
+gen_channel!(UserChangesByKind, "user", "changes", InstrumentKind, Currency, Interval);
 
 impl std::fmt::Display for UserChangesByInstrument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

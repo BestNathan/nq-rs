@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{model::interval::Interval, gen_channel};
+use crate::{gen_channel, model::interval::Interval};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PerpetualData {
