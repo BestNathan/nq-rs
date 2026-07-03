@@ -986,13 +986,9 @@ dependencies = [
  "nq-env",
  "nq-mqtt",
  "nq-observability",
- "rumqttc",
- "serde",
- "serde_json",
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
