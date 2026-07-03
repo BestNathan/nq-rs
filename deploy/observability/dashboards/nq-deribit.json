@@ -12,8 +12,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_deribit_sub_received_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}}"
+          "expr": "rate(nq_deribit_sub_received_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}}"
         }
       ],
       "fieldConfig": {
@@ -28,13 +28,13 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_deribit_sub_enqueued_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - enqueued"
+          "expr": "rate(nq_deribit_sub_enqueued_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - enqueued"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_deribit_sub_dropped_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - dropped"
+          "expr": "rate(nq_deribit_sub_dropped_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - dropped"
         }
       ],
       "fieldConfig": {
@@ -49,13 +49,13 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_mqtt_published_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - ok"
+          "expr": "rate(nq_mqtt_published_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - ok"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_mqtt_publish_failed_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - fail"
+          "expr": "rate(nq_mqtt_publish_failed_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - fail"
         }
       ],
       "fieldConfig": {
@@ -70,18 +70,18 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "nq_tokio_active_tasks{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - active"
+          "expr": "tokio_active_tasks{service_namespace=\"nq\"}",
+          "legendFormat": "{{service_name}} / {{service_version}} - active"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "nq_tokio_global_queue_depth{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - global q"
+          "expr": "tokio_global_queue_depth{service_namespace=\"nq\"}",
+          "legendFormat": "{{service_name}} / {{service_version}} - global q"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "nq_tokio_total_local_queue_depth{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - local q"
+          "expr": "tokio_total_local_queue_depth{service_namespace=\"nq\"}",
+          "legendFormat": "{{service_name}} / {{service_version}} - local q"
         }
       ],
       "fieldConfig": {
@@ -96,18 +96,18 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "nq_tokio_workers{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - workers"
+          "expr": "tokio_workers{service_namespace=\"nq\"}",
+          "legendFormat": "{{service_name}} / {{service_version}} - workers"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "nq_tokio_blocking_threads{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - blocking active"
+          "expr": "tokio_blocking_threads{service_namespace=\"nq\"}",
+          "legendFormat": "{{service_name}} / {{service_version}} - blocking active"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "nq_tokio_idle_blocking_threads{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}} - blocking idle"
+          "expr": "tokio_idle_blocking_threads{service_namespace=\"nq\"}",
+          "legendFormat": "{{service_name}} / {{service_version}} - blocking idle"
         }
       ],
       "fieldConfig": {
@@ -122,18 +122,18 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_tokio_total_polls_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - polls"
+          "expr": "rate(tokio_total_polls_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - polls"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_tokio_total_steals_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - steals"
+          "expr": "rate(tokio_total_steals_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - steals"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_tokio_total_overflows_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - overflows"
+          "expr": "rate(tokio_total_overflows_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - overflows"
         }
       ],
       "fieldConfig": {
@@ -148,8 +148,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "nq_tokio_mean_poll_us{service_name=~\"deribit-.*\"}",
-          "legendFormat": "{{service_name}}"
+          "expr": "tokio_mean_poll_us{service_namespace=\"nq\"}",
+          "legendFormat": "{{service_name}} / {{service_version}}"
         }
       ],
       "fieldConfig": {
@@ -164,18 +164,18 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_tokio_io_ready_events_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - io events"
+          "expr": "rate(tokio_io_ready_events_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - io events"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_tokio_budget_yields_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - budget yields"
+          "expr": "rate(tokio_budget_yields_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - budget yields"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_tokio_total_noops_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}} - noops"
+          "expr": "rate(tokio_total_noops_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}} - noops"
         }
       ],
       "fieldConfig": {
@@ -190,8 +190,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(nq_tokio_total_busy_secs_total{service_name=~\"deribit-.*\"}[1m])",
-          "legendFormat": "{{service_name}}"
+          "expr": "rate(tokio_total_busy_secs_total{service_namespace=\"nq\"}[1m])",
+          "legendFormat": "{{service_name}} / {{service_version}}"
         }
       ],
       "fieldConfig": {
@@ -206,7 +206,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{service_name=~\"deribit-.*\"}"
+          "expr": "{service_namespace=\"nq\"}"
         }
       ]
     },
@@ -219,7 +219,7 @@
         {
           "datasource": { "type": "tempo", "uid": "tempo" },
           "queryType": "traceql",
-          "query": "{ .service.name =~ \"deribit-.*\" }"
+          "query": "{ .service.namespace =\" nq\" }"
         }
       ]
     }
