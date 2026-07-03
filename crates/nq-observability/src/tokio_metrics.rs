@@ -38,67 +38,67 @@ fn record_metrics(
 ) -> tokio::task::JoinHandle<()> {
     // ── Stable gauges ────────────────────────────────────────────────
     let active_tasks = m
-        .u64_gauge("nq_tokio_active_tasks")
+        .u64_gauge("tokio_active_tasks")
         .with_description("Number of currently alive tasks")
         .build();
     let global_queue_depth = m
-        .u64_gauge("nq_tokio_global_queue_depth")
+        .u64_gauge("tokio_global_queue_depth")
         .with_description("Tasks scheduled in the runtime's global queue")
         .build();
     let workers =
-        m.u64_gauge("nq_tokio_workers").with_description("Number of worker threads").build();
+        m.u64_gauge("tokio_workers").with_description("Number of worker threads").build();
 
     // ── Counters ─────────────────────────────────────────────────────
     let busy_secs = m
-        .f64_counter("nq_tokio_total_busy_secs")
+        .f64_counter("tokio_total_busy_secs")
         .with_description("Cumulative busy duration across all workers (seconds)")
         .build();
     let total_polls = m
-        .u64_counter("nq_tokio_total_polls")
+        .u64_counter("tokio_total_polls")
         .with_description("Cumulative task polls across all workers")
         .build();
     let total_steals = m
-        .u64_counter("nq_tokio_total_steals")
+        .u64_counter("tokio_total_steals")
         .with_description("Cumulative tasks stolen between workers")
         .build();
     let total_overflows = m
-        .u64_counter("nq_tokio_total_overflows")
+        .u64_counter("tokio_total_overflows")
         .with_description("Cumulative local-queue overflow events")
         .build();
     let total_noops = m
-        .u64_counter("nq_tokio_total_noops")
+        .u64_counter("tokio_total_noops")
         .with_description("Cumulative false-positive unpark events")
         .build();
     let budget_yields = m
-        .u64_counter("nq_tokio_budget_yields")
+        .u64_counter("tokio_budget_yields")
         .with_description("Cumulative forced yields from exhausted budgets")
         .build();
     let io_events = m
-        .u64_counter("nq_tokio_io_ready_events")
+        .u64_counter("tokio_io_ready_events")
         .with_description("Cumulative I/O driver ready events")
         .build();
 
     // ── Gauges ───────────────────────────────────────────────────────
     let local_queue_depth = m
-        .u64_gauge("nq_tokio_total_local_queue_depth")
+        .u64_gauge("tokio_total_local_queue_depth")
         .with_description("Current total tasks in all workers' local queues")
         .build();
     let blocking_queue_depth = m
-        .u64_gauge("nq_tokio_blocking_queue_depth")
+        .u64_gauge("tokio_blocking_queue_depth")
         .with_description("Tasks waiting in the blocking threadpool")
         .build();
     let blocking_threads = m
-        .u64_gauge("nq_tokio_blocking_threads")
+        .u64_gauge("tokio_blocking_threads")
         .with_description("Active threads in blocking pool")
         .build();
     let idle_blocking_threads = m
-        .u64_gauge("nq_tokio_idle_blocking_threads")
+        .u64_gauge("tokio_idle_blocking_threads")
         .with_description("Idle threads in blocking pool")
         .build();
 
     // ── Histogram ────────────────────────────────────────────────────
     let mean_poll_us = m
-        .f64_histogram("nq_tokio_mean_poll_us")
+        .f64_histogram("tokio_mean_poll_us")
         .with_description("Exponentially-weighted moving average poll duration (µs)")
         .build();
 
