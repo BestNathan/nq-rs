@@ -19,6 +19,8 @@ spec:
           image: ghcr.io/bestnathan/nq-rs/deribit-subscription:sha-87f4779
           imagePullPolicy: Always
           env:
+            - name: DEPLOY_ENV
+              value: production
             - name: RUST_LOG
               value: info
             - name: EMQX_HOST
