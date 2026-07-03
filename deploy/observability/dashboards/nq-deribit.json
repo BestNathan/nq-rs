@@ -12,7 +12,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(deribit_sub_received_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_deribit_sub_received_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}}"
         }
       ],
@@ -28,12 +28,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(deribit_sub_enqueued_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_deribit_sub_enqueued_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - enqueued"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(deribit_sub_dropped_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_deribit_sub_dropped_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - dropped"
         }
       ],
@@ -49,12 +49,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(mqtt_published_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_mqtt_published_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - ok"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(mqtt_publish_failed_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_mqtt_publish_failed_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - fail"
         }
       ],
@@ -70,17 +70,17 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "tokio_active_tasks{service_name=~\"deribit-.*\"}",
+          "expr": "nq_tokio_active_tasks{service_name=~\"deribit-.*\"}",
           "legendFormat": "{{service_name}} - active"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "tokio_global_queue_depth{service_name=~\"deribit-.*\"}",
+          "expr": "nq_tokio_global_queue_depth{service_name=~\"deribit-.*\"}",
           "legendFormat": "{{service_name}} - global q"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "tokio_total_local_queue_depth{service_name=~\"deribit-.*\"}",
+          "expr": "nq_tokio_total_local_queue_depth{service_name=~\"deribit-.*\"}",
           "legendFormat": "{{service_name}} - local q"
         }
       ],
@@ -96,17 +96,17 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "tokio_workers{service_name=~\"deribit-.*\"}",
+          "expr": "nq_tokio_workers{service_name=~\"deribit-.*\"}",
           "legendFormat": "{{service_name}} - workers"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "tokio_blocking_threads{service_name=~\"deribit-.*\"}",
+          "expr": "nq_tokio_blocking_threads{service_name=~\"deribit-.*\"}",
           "legendFormat": "{{service_name}} - blocking active"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "tokio_idle_blocking_threads{service_name=~\"deribit-.*\"}",
+          "expr": "nq_tokio_idle_blocking_threads{service_name=~\"deribit-.*\"}",
           "legendFormat": "{{service_name}} - blocking idle"
         }
       ],
@@ -122,17 +122,17 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(tokio_total_polls_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_tokio_total_polls_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - polls"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(tokio_total_steals_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_tokio_total_steals_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - steals"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(tokio_total_overflows_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_tokio_total_overflows_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - overflows"
         }
       ],
@@ -148,7 +148,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "tokio_mean_poll_us{service_name=~\"deribit-.*\"}",
+          "expr": "nq_tokio_mean_poll_us{service_name=~\"deribit-.*\"}",
           "legendFormat": "{{service_name}}"
         }
       ],
@@ -164,17 +164,17 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(tokio_io_ready_events_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_tokio_io_ready_events_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - io events"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(tokio_budget_yields_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_tokio_budget_yields_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - budget yields"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(tokio_total_noops_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_tokio_total_noops_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}} - noops"
         }
       ],
@@ -190,7 +190,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(tokio_total_busy_secs_total{service_name=~\"deribit-.*\"}[1m])",
+          "expr": "rate(nq_tokio_total_busy_secs_total{service_name=~\"deribit-.*\"}[1m])",
           "legendFormat": "{{service_name}}"
         }
       ],

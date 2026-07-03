@@ -8,6 +8,7 @@ use nq_deribit::{
     metrics::DERIBIT_METRICS,
     pool::{ConnectionPool, PoolConfig},
 };
+use nq_observability::metrics::KeyValue;
 use tokio::select;
 use tokio::sync::broadcast::error::RecvError;
 use tokio_util::sync::CancellationToken;
@@ -165,13 +166,15 @@ impl Runner for App {
                         }
                     };
 
+                    let mqtt_attrs = &[KeyValue::new("mqtt_topic", self.topic.as_ref().to_string())];
+
                     match &self.output {
                         Output::Mqtt { client } => {
                             if let Err(e) = client.publish(&self.topic, data).await {
-                                DERIBIT_METRICS.mqtt_publish_failed.add(1, &[]);
+                                DERIBIT_METRICS.mqtt_publish_failed.add(1, mqtt_attrs);
                                 warn!(error = ?e, "mqtt publish failed");
                             } else {
-                                DERIBIT_METRICS.mqtt_published.add(1, &[]);
+                                DERIBIT_METRICS.mqtt_published.add(1, mqtt_attrs);
                             }
                         }
                         Output::Stdout => {
@@ -200,7 +203,10 @@ impl Runner for App {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _guard = nq_observability::init_telemetry("deribit-subscription")?;
+    let _guard = nq_observability::init_telemetry(
+        nq_observability::TelemetryConfig::new("deribit-subscription")
+            .with_version(env!("CARGO_PKG_VERSION")),
+    )?;
     nq_observability::spawn_tokio_metrics();
 
     let channels = resolve_channels();

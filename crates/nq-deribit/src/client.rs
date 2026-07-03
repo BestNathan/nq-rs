@@ -11,6 +11,7 @@ use derive_builder::Builder;
 use flume::{Receiver, Sender};
 use futures_util::{SinkExt, StreamExt};
 use nq_app::runner::Runner;
+use nq_observability::metrics::KeyValue;
 use reqwest::Proxy;
 use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
 use serde_json::Value;
@@ -289,18 +290,29 @@ impl Client {
                                     }
                                 }
                                 "subscription" => {
-                                    crate::metrics::DERIBIT_METRICS.sub_received.add(1, &[]);
+                                    let channel_group =
+                                        crate::metrics::extract_channel_group(&text).to_string();
+                                    let attrs = &[KeyValue::new("channel_group", channel_group.clone())];
+                                    crate::metrics::DERIBIT_METRICS.sub_received.add(1, attrs);
                                     // Use try_send to avoid blocking WS reader when channel is full
                                     match self.subscription_tx.try_send(text) {
                                         Ok(_) => {
-                                            crate::metrics::DERIBIT_METRICS.sub_enqueued.add(1, &[]);
+                                            crate::metrics::DERIBIT_METRICS.sub_enqueued.add(1, attrs);
                                         }
                                         Err(flume::TrySendError::Full(_)) => {
-                                            crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, &[]);
+                                            let drop_attrs = &[
+                                                KeyValue::new("channel_group", channel_group.clone()),
+                                                KeyValue::new("reason", "full"),
+                                            ];
+                                            crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, drop_attrs);
                                             warn!("subscription channel full, dropping ticker message");
                                         }
                                         Err(flume::TrySendError::Disconnected(_)) => {
-                                            crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, &[]);
+                                            let drop_attrs = &[
+                                                KeyValue::new("channel_group", channel_group),
+                                                KeyValue::new("reason", "disconnected"),
+                                            ];
+                                            crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, drop_attrs);
                                             warn!("subscription rx disconnected");
                                         }
                                     }

@@ -7,6 +7,7 @@ use nq_deribit::message::{SubscriptionMessage, SubscriptionParams};
 
 use nq_deribit::pool::ConnectionPool;
 use nq_deribit::subscription::ticker::TickerData;
+use nq_observability::metrics::KeyValue;
 use rumqttc::{AsyncClient, QoS};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
@@ -42,6 +43,7 @@ impl Runner for TickerRouter {
                             break;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            nq_deribit::metrics::DERIBIT_METRICS.broadcast_lagged.add(n, &[]);
                             warn!(skipped = n, "ticker router: lagged behind broadcast");
                             continue;
                         }
@@ -74,6 +76,8 @@ impl Runner for TickerRouter {
                             }
                         };
 
+                        let topic_label = topic.clone();
+
                         // Use timeout to prevent TickerRouter from blocking forever
                         // when the MQTT client is disconnected. Without this, the router
                         // stalls, the subscription channel fills, and OOM follows.
@@ -87,14 +91,29 @@ impl Runner for TickerRouter {
                             )
                         ).await {
                             Ok(Ok(())) => {
-                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_published.add(1, &[]);
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_published.add(
+                                    1,
+                                    &[KeyValue::new("mqtt_topic", topic_label)],
+                                );
                             }
                             Ok(Err(e)) => {
-                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(1, &[]);
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(
+                                    1,
+                                    &[
+                                        KeyValue::new("mqtt_topic", topic_label),
+                                        KeyValue::new("error", "error"),
+                                    ],
+                                );
                                 warn!(error = ?e, topic = topic, "mqtt publish failed");
                             }
                             Err(_timeout) => {
-                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(1, &[]);
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(
+                                    1,
+                                    &[
+                                        KeyValue::new("mqtt_topic", topic_label),
+                                        KeyValue::new("error", "timeout"),
+                                    ],
+                                );
                                 // Don't warn on every timeout — would flood logs at ~150 msg/s
                             }
                         }

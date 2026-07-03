@@ -10,4 +10,5 @@ pub fn meter(scope: &'static str) -> Meter {
 
 // Re-export commonly used OTel metrics types so downstream crates don't
 // need to add opentelemetry as a direct dependency.
+pub use opentelemetry::KeyValue;
 pub use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
