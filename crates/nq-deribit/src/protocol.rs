@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use nq_observability::metrics::KeyValue;
 use serde_json::json;
 use tracing::{debug, info, warn};
 
@@ -195,14 +196,20 @@ impl ProtocolHandler {
                 vec![OutgoingAction::ExpectResponse(test_payload, id)]
             }
             "subscription" => {
-                crate::metrics::DERIBIT_METRICS.sub_received.add(1, &[]);
+                let channel_group = crate::metrics::extract_channel_group(text);
+                let attrs = &[KeyValue::new("channel_group", channel_group.to_string())];
+                crate::metrics::DERIBIT_METRICS.sub_received.add(1, attrs);
                 if let Some(tx) = &self.broadcast_tx {
                     match tx.send(text.to_string()) {
                         Ok(_) => {
-                            crate::metrics::DERIBIT_METRICS.sub_enqueued.add(1, &[]);
+                            crate::metrics::DERIBIT_METRICS.sub_enqueued.add(1, attrs);
                         }
                         Err(_) => {
-                            crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, &[]);
+                            let drop_attrs = &[
+                                KeyValue::new("channel_group", channel_group.to_string()),
+                                KeyValue::new("reason", "no_receivers"),
+                            ];
+                            crate::metrics::DERIBIT_METRICS.sub_dropped.add(1, drop_attrs);
                         }
                     }
                 }
