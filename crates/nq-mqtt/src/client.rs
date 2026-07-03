@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use nq_app::runner::Runner;
 use rand::{Rng, distr::Alphanumeric, rng};
@@ -55,6 +55,15 @@ impl Client {
 
     pub fn inner(&self) -> AsyncClient {
         self.inner.clone()
+    }
+
+    /// Publish a message to the given MQTT topic with sensible defaults
+    /// (QoS::AtLeastOnce, retain=true).
+    pub async fn publish(&self, topic: &str, payload: String) -> Result<()> {
+        self.inner
+            .publish(topic, rumqttc::QoS::AtLeastOnce, true, payload)
+            .await
+            .context("mqtt publish failed")
     }
 }
 

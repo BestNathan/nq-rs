@@ -32,6 +32,20 @@ impl ConnectionPool {
         let (broadcast_tx, _) = tokio::sync::broadcast::channel(50000);
         let first = Arc::new(Connection::new(0, config.connection_config.clone()));
         first.set_broadcast_tx(broadcast_tx.clone());
+
+        // Auto-spawn eventloop for the initial connection (consistent with
+        // create_connection). Consumers do not need to spawn connection runners
+        // manually — the pool manages all connection lifecycles internally.
+        {
+            let conn = first.clone();
+            let ct = cancel_token.clone();
+            tokio::spawn(async move {
+                if let Err(e) = conn.run(ct).await {
+                    warn!(connection_id = 0, error = ?e, "connection eventloop exited with error");
+                }
+            });
+        }
+
         Self {
             connections: Arc::new(RwLock::new(vec![first])),
             capacity: config.capacity_per_connection,
@@ -231,7 +245,9 @@ impl ConnectionPool {
         let delay = Duration::from_secs(id as u64);
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
-            let _ = conn_clone.run(ct).await;
+            if let Err(e) = conn_clone.run(ct).await {
+                warn!(connection_id = id, error = ?e, "connection eventloop exited with error");
+            }
         });
 
         conn

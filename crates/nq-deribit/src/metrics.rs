@@ -32,6 +32,10 @@ pub static DERIBIT_METRICS: Lazy<DeribitMetrics> = Lazy::new(|| {
             .u64_counter("mqtt.publish.failed")
             .with_description("MQTT publish attempts that failed")
             .build(),
+        broadcast_lagged: m
+            .u64_counter("deribit.broadcast.lagged")
+            .with_description("Messages skipped due to slow consumer (broadcast channel lagged)")
+            .build(),
     }
 });
 
@@ -41,4 +45,5 @@ pub struct DeribitMetrics {
     pub sub_dropped: Counter<u64>,
     pub mqtt_published: Counter<u64>,
     pub mqtt_publish_failed: Counter<u64>,
+    pub broadcast_lagged: Counter<u64>,
 }
