@@ -1,15 +1,11 @@
-use anyhow::{Error, Result};
-use nq_app::application::Application;
-use nq_deribit::client;
-use nq_deribit::client::ConfigBuilder;
-use nq_deribit::model::currency::Currency;
-use nq_deribit::model::instrument::InstrumentKind;
-use nq_deribit::model::interval::Interval;
-use nq_deribit::subscription::channel::Channel;
-use nq_deribit::subscription::trades::{TradesByInstrumentChannel, TradesByKindChannel};
-use reqwest::Proxy;
 use std::env;
 use std::sync::Arc;
+
+use anyhow::Result;
+use nq_app::application::Application;
+use nq_app::runner::Runner;
+use nq_deribit::connection::ConnectionConfigBuilder;
+use nq_deribit::pool::{ConnectionPool, PoolConfig};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -17,32 +13,49 @@ use tracing::info;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let config = ConfigBuilder::default()
-        .proxy(Proxy::all(env::var("PROXY")?)?)
-        .public_subscribe_channels(vec![
-            // TradesByKindChannel(InstrumentKind::Option, Currency::BTC, Interval::Agg2).to_channel_str(),
-            // TradesByKindChannel(InstrumentKind::Option, Currency::BTC, Interval::Ms100).to_channel_str(),
-            // TradesByInstrumentChannel("BTC-PERPETUAL".to_string(), Interval::Ms100).to_channel_str(),
-            TradesByInstrumentChannel("BTC-PERPETUAL".to_string(), Interval::Raw).to_channel_str(),
-        ])
+    let channels: Vec<String> = vec![
+        "user.orders.BTC-PERPETUAL.raw".to_string(),
+        "user.trades.BTC-PERPETUAL.raw".to_string(),
+    ];
+
+    let conn_config = ConnectionConfigBuilder::default()
         .client_id(env::var("DERIBIT_API_CLIENT_ID").ok())
         .client_secret(env::var("DERIBIT_API_CLIENT_SECRET").ok())
         .build()?;
-    let deribit = client::Client::builder().config(config).build()?;
+    let pool = Arc::new(ConnectionPool::new(PoolConfig {
+        capacity_per_connection: 200,
+        connection_config: conn_config,
+    }));
 
-    let subsriber = deribit.subscription_client();
+    let ct = pool.cancel_token();
 
+    // Spawn connection eventloops
+    for conn in pool.connection_runners() {
+        let ct = ct.clone();
+        tokio::spawn(async move {
+            let _ = conn.run(ct).await;
+        });
+    }
+
+    // Subscribe (private channels require auth)
+    pool.subscribe(channels).await?;
+
+    // Receive subscription messages
+    let mut sub_rx = pool.subscribe_to_broadcast();
     tokio::spawn(async move {
-        while let Ok(msg) = subsriber.recv().await {
-            info!("{:?}", msg)
+        loop {
+            match sub_rx.recv().await {
+                Ok(msg) => info!("{}", msg),
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "broadcast lagged");
+                }
+            }
         }
-
-        Ok::<(), Error>(())
+        Ok::<(), anyhow::Error>(())
     });
 
     let app = Application::new();
-
-    app.add_runner(Arc::new(deribit));
     app.run(CancellationToken::new()).await;
     Ok(())
 }

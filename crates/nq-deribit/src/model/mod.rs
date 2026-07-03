@@ -1,9 +1,9 @@
 pub mod currency;
 pub mod direction;
-pub mod interval;
-pub mod liquidation;
-pub mod order;
 pub mod index;
 pub mod instrument;
-pub mod ticker;
+pub mod interval;
+pub mod liquidation;
 pub mod option;
+pub mod order;
+pub mod ticker;

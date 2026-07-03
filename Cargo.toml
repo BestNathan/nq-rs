@@ -16,6 +16,7 @@ nq-deribit = { path = "./crates/nq-deribit" }
 nq-env = { path = "./crates/nq-env" }
 nq-macro = { path = "./crates/nq-macro" }
 nq-mqtt = { path = "./crates/nq-mqtt" }
+nq-observability = { path = "./crates/nq-observability" }
 
 # fluvio
 fluvio = { git = "https://github.com/infinyon/fluvio", tag = "v0.16.1" }
@@ -36,6 +37,65 @@ tokio = { version = "1.44.1", features = ["full"] }
 tokio-util = { version = "0.7.13", features = ["rt"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
+
+# ── Workspace-wide lint configuration (Rust 1.74+) ────────────────────
+# Equivalent to #![deny(...)] / #![warn(...)] in every crate's lib.rs/main.rs.
+# Individual crates can override with #[allow(...)] where necessary.
+
+[workspace.lints.rust]
+# Safety
+unsafe_code = "deny"
+unused_results = "deny"
+missing_docs = "warn"
+unused_imports = "deny"
+unused_variables = "deny"
+dead_code = "deny"
+
+[workspace.lints.clippy]
+# ── Level 1: Absolute denials (must never appear) ─────────────────────
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+float_arithmetic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+
+# ── Level 2: Strong constraints (allocation / clone / perf) ───────────
+clone_on_ref_ptr = "deny"
+implicit_clone = "deny"
+redundant_clone = "deny"
+borrowed_box = "deny"
+rc_buffer = "deny"
+vec_init_then_push = "deny"
+string_slice = "deny"
+large_enum_variant = "deny"
+large_stack_arrays = "deny"
+
+# ── Level 3: Complexity control ───────────────────────────────────────
+too_many_arguments = "warn"
+too_many_lines = "warn"
+cognitive_complexity = "warn"
+type_complexity = "warn"
+
+# ── Level 4: Style / consistency ──────────────────────────────────────
+single_match = "warn"
+match_bool = "warn"
+if_not_else = "warn"
+manual_ok_or = "warn"
+manual_map = "warn"
+return_self_not_must_use = "deny"
+must_use_candidate = "warn"
+missing_errors_doc = "warn"
+
+# ── HFT-specific: Prevent precision loss / overflow ───────────────────
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+transmute_ptr_to_ptr = "deny"
 
 [profile.release-lto]
 inherits = "release"

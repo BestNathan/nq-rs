@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use nq_app::runner::Runner;
 use nq_deribit::message::{SubscriptionMessage, SubscriptionParams};
+
 use nq_deribit::pool::ConnectionPool;
 use nq_deribit::subscription::ticker::TickerData;
 use rumqttc::{AsyncClient, QoS};
@@ -20,11 +20,7 @@ pub struct TickerRouter {
 
 impl TickerRouter {
     pub fn new(pool: Arc<ConnectionPool>, mqtt_client: AsyncClient, topic_prefix: String) -> Self {
-        Self {
-            pool,
-            mqtt_client,
-            topic_prefix,
-        }
+        Self { pool, mqtt_client, topic_prefix }
     }
 }
 
@@ -33,17 +29,21 @@ impl Runner for TickerRouter {
     async fn run(&self, ct: CancellationToken) -> Result<()> {
         debug!("ticker router is running");
 
-        let mut stream = self.pool.subscription_stream();
+        let mut rx = self.pool.subscribe_to_broadcast();
 
         loop {
             select! {
                 _ = ct.cancelled() => break,
-                msg = stream.next() => {
-                    let msg = match msg {
-                        Some(m) => m,
-                        None => {
-                            debug!("ticker router: subscription stream ended");
+                result = rx.recv() => {
+                    let msg = match result {
+                        Ok(m) => m,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            debug!("ticker router: broadcast channel closed");
                             break;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(skipped = n, "ticker router: lagged behind broadcast");
+                            continue;
                         }
                     };
 
@@ -74,13 +74,29 @@ impl Runner for TickerRouter {
                             }
                         };
 
-                        if let Err(e) = self.mqtt_client.publish(
-                            &topic,
-                            QoS::AtLeastOnce,
-                            false,
-                            payload,
+                        // Use timeout to prevent TickerRouter from blocking forever
+                        // when the MQTT client is disconnected. Without this, the router
+                        // stalls, the subscription channel fills, and OOM follows.
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            self.mqtt_client.publish(
+                                &topic,
+                                QoS::AtLeastOnce,
+                                false,
+                                payload,
+                            )
                         ).await {
-                            warn!(error = ?e, topic = topic, "mqtt publish failed");
+                            Ok(Ok(())) => {
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_published.add(1, &[]);
+                            }
+                            Ok(Err(e)) => {
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(1, &[]);
+                                warn!(error = ?e, topic = topic, "mqtt publish failed");
+                            }
+                            Err(_timeout) => {
+                                nq_deribit::metrics::DERIBIT_METRICS.mqtt_publish_failed.add(1, &[]);
+                                // Don't warn on every timeout — would flood logs at ~150 msg/s
+                            }
                         }
                     }
                 }

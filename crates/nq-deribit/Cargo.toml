@@ -13,6 +13,8 @@ flume = {workspace = true}
 futures-util = {workspace = true}
 nq-app = {workspace = true}
 nq-env = {workspace = true}
+nq-observability = {workspace = true}
+once_cell = "1"
 reqwest = {version = "0.12", default-features = false, features = ["rustls-tls", "json"]}
 reqwest-websocket = "0.4.4"
 serde = {workspace = true}

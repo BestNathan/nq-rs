@@ -15,17 +15,11 @@ impl IndexName {
     }
 
     pub fn new_upper(base: String, quote: String) -> Self {
-        Self {
-            quote: quote.to_uppercase(),
-            base: base.to_uppercase(),
-        }
+        Self { quote: quote.to_uppercase(), base: base.to_uppercase() }
     }
 
     pub fn new_lower(base: String, quote: String) -> Self {
-        Self {
-            quote: quote.to_lowercase(),
-            base: base.to_lowercase(),
-        }
+        Self { quote: quote.to_lowercase(), base: base.to_lowercase() }
     }
 
     pub fn to_uppper(&self) -> Self {

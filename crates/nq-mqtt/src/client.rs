@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use nq_app::runner::Runner;
 use rand::{Rng, distr::Alphanumeric, rng};
@@ -8,11 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 fn random_string(length: usize) -> String {
-    rng()
-        .sample_iter(&Alphanumeric)
-        .take(length)
-        .map(char::from)
-        .collect()
+    rng().sample_iter(&Alphanumeric).take(length).map(char::from).collect()
 }
 
 pub struct Client {
@@ -50,10 +46,7 @@ impl Client {
             });
         }
 
-        Self {
-            inner: client,
-            canceltoken,
-        }
+        Self { inner: client, canceltoken }
     }
 
     pub fn builder() -> ClientBuilder {
@@ -62,6 +55,15 @@ impl Client {
 
     pub fn inner(&self) -> AsyncClient {
         self.inner.clone()
+    }
+
+    /// Publish a message to the given MQTT topic with sensible defaults
+    /// (QoS::AtLeastOnce, retain=true).
+    pub async fn publish(&self, topic: &str, payload: String) -> Result<()> {
+        self.inner
+            .publish(topic, rumqttc::QoS::AtLeastOnce, true, payload)
+            .await
+            .context("mqtt publish failed")
     }
 }
 
@@ -90,39 +92,26 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            id: None,
-            host: "127.0.0.1".to_owned(),
-            port: 1883,
-        }
+        Self { id: None, host: "127.0.0.1".to_owned(), port: 1883 }
     }
 }
 
+#[derive(Default)]
 pub struct ClientBuilder {
     config: Config,
-}
-
-impl Default for ClientBuilder {
-    fn default() -> Self {
-        Self {
-            config: Config::default(),
-        }
-    }
 }
 
 impl ClientBuilder {
     pub fn build(self) -> Client {
         let mut option = MqttOptions::new(
-            self.config
-                .id
-                .unwrap_or(format!("nq-rs/{}", random_string(10))),
+            self.config.id.unwrap_or(format!("nq-rs/{}", random_string(10))),
             self.config.host,
             self.config.port,
         );
 
         option.set_max_packet_size(1024 * 1024, 1024 * 1024);
 
-        let (client, eventloop) = AsyncClient::new(option, 10);
+        let (client, eventloop) = AsyncClient::new(option, 1000);
 
         Client::new(client, eventloop)
     }
@@ -164,10 +153,7 @@ mod tests {
         let canceltoken = CancellationToken::new();
         let application = Application::new();
 
-        let client = Client::builder()
-            .set_host("192.168.2.106".to_string())
-            .set_port(1883)
-            .build();
+        let client = Client::builder().set_host("192.168.2.106".to_string()).set_port(1883).build();
 
         let ac = client.inner();
 

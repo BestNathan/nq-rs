@@ -1,0 +1,14 @@
+# Clippy behavioral constraints — HFT / trading system profile
+
+# ---- complexity limits ----
+cognitive-complexity-threshold = 15
+too-many-arguments-threshold = 4
+too-many-lines-threshold = 200
+type-complexity-threshold = 250
+
+# ---- unwrap / panic control ----
+allow-expect-in-tests = false
+allow-unwrap-in-tests = false
+
+# ---- clone / allocation ----
+avoid-breaking-exported-api = true

@@ -6,20 +6,72 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
 use flume::{Receiver, Sender};
-use futures_util::{SinkExt, StreamExt};
-use nq_app::runner::Runner;
 use reqwest::Proxy;
-use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
-use serde_json::{Value, json};
-use tokio::{select, sync::oneshot};
+use tokio::select;
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::errors::DeribitError::RequestTimeout;
-use crate::jsonrpc::{JSPNRPCRequest, JSONRPCResponse};
-use crate::request::authentication::AuthRequest;
-use crate::request::subscribe::PublicSubscribeRequest;
+use crate::jsonrpc::{JSONRPCResponse, JSPNRPCRequest};
+use crate::protocol::{JsonRpcCaller, OutgoingAction, ProtocolConfig, ProtocolHandler};
 use crate::request::Request;
+use crate::transport::{Transport, WsTransportImpl};
+
+// ─── SetupCaller ──────────────────────────────────────────────────────
+
+/// Implements JsonRpcCaller via direct transport access.
+/// Used during the setup phase before the main select! eventloop starts.
+struct SetupCaller<'a> {
+    transport: &'a mut (dyn Transport + 'a),
+}
+
+#[async_trait]
+impl JsonRpcCaller for SetupCaller<'_> {
+    async fn call(&mut self, payload: &str, timeout: Duration) -> Result<String> {
+        // Validate JSON-RPC format before sending — catches protocol errors
+        // like missing "method" or "params" fields at send time.
+        crate::jsonrpc::validate_jsonrpc_request(payload)
+            .context("SetupCaller: invalid JSON-RPC request")?;
+
+        let id = {
+            let value: serde_json::Value =
+                serde_json::from_str(payload).with_context(|| "SetupCaller: invalid JSON")?;
+            value.get("id").and_then(|v| v.as_i64()).with_context(|| "SetupCaller: missing id")?
+        };
+
+        self.transport.send(payload.to_string()).await.with_context(|| "SetupCaller: send")?;
+
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(anyhow::Error::from(crate::errors::DeribitError::RequestTimeout));
+            }
+
+            let result = tokio::time::timeout(remaining, self.transport.recv())
+                .await
+                .map_err(|_| anyhow::Error::from(crate::errors::DeribitError::RequestTimeout))?;
+
+            let text = match result {
+                Ok(Some(t)) => t,
+                Ok(None) => return Err(anyhow::anyhow!("SetupCaller: transport closed")),
+                Err(e) => return Err(anyhow::Error::new(e).context("SetupCaller: transport error")),
+            };
+
+            let value: serde_json::Value = serde_json::from_str(&text)
+                .with_context(|| "SetupCaller: invalid JSON response")?;
+
+            if let Some(resp_id) = value.get("id").and_then(|v| v.as_i64())
+                && resp_id == id
+            {
+                return Ok(text);
+            }
+            // Non-matching messages (notifications) are discarded during setup.
+            // This is acceptable because setup runs before any subscriptions
+            // are active.
+        }
+    }
+}
 
 // ─── Connection ──────────────────────────────────────────────────────
 
@@ -28,8 +80,9 @@ pub struct Connection {
     channels: Arc<RwLock<HashSet<String>>>,
     config: Arc<ConnectionConfig>,
     token: Arc<RwLock<Option<String>>>,
-    subscription_tx: Sender<String>,
-    subscription_rx: Receiver<String>,
+    subscription_broadcast_tx: std::sync::OnceLock<tokio::sync::broadcast::Sender<String>>,
+    /// Shared HTTP client — created once, reused across all reconnects.
+    client: reqwest::Client,
     message_tx: Sender<String>,
     message_rx: Receiver<String>,
     responser_tx: Sender<(i64, oneshot::Sender<String>)>,
@@ -38,27 +91,38 @@ pub struct Connection {
 
 impl Connection {
     pub fn new(id: usize, config: ConnectionConfig) -> Self {
-        // Use bounded channels to provide backpressure and prevent OOM
-        let sub_cap = config.subscription_channel_capacity;
-        let (subscription_tx, subscription_rx) = flume::bounded::<String>(sub_cap);
+        // Build the shared HTTP client once — this is the key fix for the
+        // reconnection failure: previously a new client was created on every
+        // reconnect, wasting resources and triggering proxy rate limits.
+        let client = match config.proxy {
+            Some(ref proxy) => reqwest::Client::builder()
+                .proxy(proxy.clone())
+                .build()
+                .expect("reqwest::Client::build failed"),
+            _ => reqwest::Client::builder().build().expect("reqwest::Client::build failed"),
+        };
+
         let msg_cap = config.message_channel_capacity;
         let (message_tx, message_rx) = flume::bounded::<String>(msg_cap);
         let resp_cap = config.responser_channel_capacity;
-        let (responser_tx, responser_rx) = flume::bounded::<(i64, oneshot::Sender<String>)>(resp_cap);
+        let (responser_tx, responser_rx) =
+            flume::bounded::<(i64, oneshot::Sender<String>)>(resp_cap);
 
         Self {
             id,
             channels: Arc::new(RwLock::new(HashSet::new())),
             config: Arc::new(config),
             token: Arc::new(RwLock::new(None)),
-            subscription_tx,
-            subscription_rx,
+            subscription_broadcast_tx: std::sync::OnceLock::new(),
+            client,
             message_tx,
             message_rx,
             responser_tx,
             responser_rx,
         }
     }
+
+    // ── Public API (unchanged signatures) ───────────────────────────
 
     pub fn id(&self) -> usize {
         self.id
@@ -68,67 +132,99 @@ impl Connection {
         self.channels.read().unwrap().len()
     }
 
+    /// Synchronously add channels to the tracked set without making API calls.
+    pub fn pre_track_channels(&self, channels: &[String]) {
+        let mut set = self.channels.write().unwrap();
+        set.extend(channels.iter().cloned());
+    }
+
     pub fn subscribed_channels(&self) -> HashSet<String> {
         self.channels.read().unwrap().clone()
     }
 
-    pub fn subscription_rx(&self) -> Receiver<String> {
-        self.subscription_rx.clone()
+    pub fn set_broadcast_tx(&self, tx: tokio::sync::broadcast::Sender<String>) {
+        let _ = self.subscription_broadcast_tx.set(tx);
     }
 
-    /// Subscribe to new channels dynamically. Channels are added to the live set
-    /// immediately (for reconnect resilience) and the subscribe request is sent.
+    /// Subscribe to new channels dynamically.
     pub async fn subscribe(&self, channels: Vec<String>) -> Result<()> {
         if channels.is_empty() {
             return Ok(());
         }
-
-        // Add to set immediately so reconnect will include them even if subscribe fails temporarily
         {
             let mut set = self.channels.write().unwrap();
             set.extend(channels.iter().cloned());
         }
 
-        // Batch subscribe in chunks to avoid oversized WS messages
-        const BATCH_SIZE: usize = 100;
+        const BATCH_SIZE: usize = 250;
+        const BATCH_DELAY_MS: u64 = 200;
+        let total = channels.len();
+        let mut done = 0usize;
         for chunk in channels.chunks(BATCH_SIZE) {
-            let req = PublicSubscribeRequest::new(chunk.to_vec());
+            let req = crate::request::subscribe::PublicSubscribeRequest::new(chunk.to_vec());
             match self.call_api(req).await {
                 Ok(_) => {
-                    debug!(connection_id = self.id, "subscribed to {} channels", chunk.len());
+                    done += chunk.len();
+                    info!(
+                        connection_id = self.id,
+                        progress = %format!("{}/{}", done, total),
+                        "subscribed batch"
+                    );
                 }
                 Err(e) => {
-                    warn!(connection_id = self.id, error = ?e, batch_size = chunk.len(),
-                        "subscribe batch failed, channels will retry on reconnect");
+                    warn!(
+                        connection_id = self.id,
+                        error = ?e,
+                        batch_size = chunk.len(),
+                        "subscribe batch failed, remaining will retry on reconnect"
+                    );
+                    break;
                 }
             }
+            if done < total {
+                tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
+            }
         }
-
         Ok(())
     }
 
     /// Re-subscribe all channels currently in the tracked set.
-    /// Useful after reconnect when the WS subscription state may be lost.
     pub async fn resubscribe_all(&self) -> Result<()> {
         let channels: Vec<String> = self.channels.read().unwrap().iter().cloned().collect();
         if channels.is_empty() {
             return Ok(());
         }
 
-        const BATCH_SIZE: usize = 100;
-        let mut success = 0;
+        const BATCH_SIZE: usize = 250;
+        const BATCH_DELAY_MS: u64 = 200;
+        let total = channels.len();
+        let mut done = 0usize;
         let mut failed = 0;
         for chunk in channels.chunks(BATCH_SIZE) {
-            let req = PublicSubscribeRequest::new(chunk.to_vec());
+            let req = crate::request::subscribe::PublicSubscribeRequest::new(chunk.to_vec());
             match self.call_api(req).await {
-                Ok(_) => success += chunk.len(),
+                Ok(_) => {
+                    done += chunk.len();
+                    info!(
+                        connection_id = self.id,
+                        progress = %format!("{}/{}", done, total),
+                        "resubscribed batch"
+                    );
+                }
                 Err(e) => {
-                    warn!(connection_id = self.id, error = ?e, "resubscribe batch failed");
+                    warn!(
+                        connection_id = self.id,
+                        error = ?e,
+                        "resubscribe batch failed"
+                    );
                     failed += chunk.len();
                 }
             }
+            if done + failed < total {
+                tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
+            }
         }
-        info!(connection_id = self.id, success, failed, total = channels.len(), "resubscribe_all done");
+        info!(connection_id = self.id, success = done, failed, total, "resubscribe_all done");
         Ok(())
     }
 
@@ -157,6 +253,10 @@ impl Connection {
         }
     }
 
+    /// Send a JSON-RPC API call through the channel-based routing system.
+    /// Used by `subscribe`, `unsubscribe`, `resubscribe_all` during normal
+    /// operation. During reconnection setup, [`ProtocolHandler::run_setup`]
+    /// uses direct transport calls instead.
     pub async fn call_api<R>(&self, request: R) -> Result<R::Response>
     where
         R: Request,
@@ -178,258 +278,271 @@ impl Connection {
             }
         };
 
-        self.message_tx
-            .send_async(payload)
-            .await
-            .with_context(|| "connection send payload")?;
+        self.message_tx.send_async(payload).await.with_context(|| "connection send payload")?;
 
         self.responser_tx
             .send_async((id, responser_tx))
             .await
             .with_context(|| "connection send responser")?;
 
-        let resp = tokio::time::timeout(Duration::from_secs(self.config.request_timeout), responser_rx)
-            .await
-            .map_err(|_| anyhow::Error::from(RequestTimeout))
-            .with_context(|| "connection responser timeout")?
-            .with_context(|| "connection responser recv")?;
+        let resp =
+            tokio::time::timeout(Duration::from_secs(self.config.request_timeout), responser_rx)
+                .await
+                .map_err(|_| anyhow::Error::from(crate::errors::DeribitError::RequestTimeout))
+                .with_context(|| "connection responser timeout")?
+                .with_context(|| "connection responser recv")?;
 
         let result: JSONRPCResponse<R::Response> =
             serde_json::from_str(&resp).with_context(|| "connection response serde")?;
 
         match result.result.map_right(|e| {
-            crate::errors::DeribitError::RemoteError {
-                code: e.code,
-                message: e.message,
-            }
-            .into()
+            crate::errors::DeribitError::RemoteError { code: e.code, message: e.message }.into()
         }) {
             either::Either::Left(v) => Ok(v),
             either::Either::Right(e) => Err(e),
         }
     }
 
-    fn build_http_client(&self) -> Result<reqwest::Client> {
-        let client = match self.config.proxy {
-            Some(ref proxy) => reqwest::Client::builder().proxy(proxy.clone()).build()?,
-            _ => reqwest::Client::builder().build()?,
-        };
-        Ok(client)
-    }
-
-    async fn connect_websocket(&self) -> Result<WebSocket> {
-        let client = self.build_http_client()?;
-        let res = client
-            .get(self.config.url.clone())
-            .upgrade()
-            .send()
-            .await
-            .with_context(|| "connection http upgrade")?
-            .into_websocket()
-            .await
-            .with_context(|| "connection websocket upgrade")?;
-        Ok(res)
-    }
+    // ── Eventloop ───────────────────────────────────────────────────
 
     pub async fn eventloop(&self, ct: CancellationToken) -> Result<()> {
         debug!(connection_id = self.id, "connection eventloop begin");
 
-        // Bounded channels for per-reconnect eventloop communication
-        let (el_payload_tx, el_payload_rx) = flume::bounded::<String>(100);
-        let (el_responser_tx, el_responser_rx) = flume::bounded::<(i64, oneshot::Sender<String>)>(100);
+        // ── Layer 1: Transport — shared reqwest::Client, one per Connection ──
+        let mut transport =
+            WsTransportImpl::new(self.client.clone(), self.config.url.clone(), self.id);
+
+        // ── Layer 2: Protocol ────────────────────────────────────────
+        let protocol = ProtocolHandler::new(
+            self.token.clone(),
+            self.channels.clone(),
+            self.subscription_broadcast_tx.get().cloned(),
+            ProtocolConfig {
+                heartbeat_interval: self.config.heartbeat_interval,
+                conn_id: self.id,
+                client_id: self.config.client_id.clone(),
+                client_secret: self.config.client_secret.clone(),
+            },
+        );
+
+        let mut backoff_secs: u64 = 1;
+        let mut setup_backoff_secs: u64 = 5;
+        const MAX_BACKOFF_SECS: u64 = 60;
+        const MAX_SETUP_BACKOFF_SECS: u64 = 120;
+
+        // Per-connection random seed for jitter.
+        let jitter_seed: u64 = (self.id as u64).wrapping_mul(1_000_000);
 
         loop {
             if ct.is_cancelled() {
                 return Ok(());
             }
 
-            debug!(connection_id = self.id, "connecting websocket");
-            let mut ws = select! {
-                ws = self.connect_websocket() => ws?,
-                _ = ct.cancelled() => return Ok(()),
-            };
-            debug!(connection_id = self.id, "websocket connected");
-
-            let (err_tx, err_rx) = flume::bounded(1);
-            let mut responser_map: HashMap<i64, oneshot::Sender<String>> = HashMap::new();
-            let mut message_map: HashMap<i64, String> = HashMap::new();
-
-            // Setup task: heartbeat, auth, re-subscribe tracked channels
-            {
-                let err_tx = err_tx.clone();
-                let el_payload_tx = el_payload_tx.clone();
-                let el_responser_tx = el_responser_tx.clone();
-                let channels = self.channels.read().unwrap().clone();
-                let token = self.token.clone();
-                let heartbeat_interval = self.config.heartbeat_interval;
-                let client_id = self.config.client_id.clone();
-                let client_secret = self.config.client_secret.clone();
-                let conn_id = self.id;
-
-                tokio::spawn(async move {
-                    let res = async {
-                        // 1. Set heartbeat
-                        let hb_id = 900_000 + conn_id as i64;
-                        let hb_payload = json!({
-                            "jsonrpc": "2.0",
-                            "id": hb_id,
-                            "method": "public/set_heartbeat",
-                            "params": { "interval": heartbeat_interval }
-                        }).to_string();
-                        let (tx, rx) = oneshot::channel();
-                        el_payload_tx.send_async(hb_payload).await?;
-                        el_responser_tx.send_async((hb_id, tx)).await?;
-                        let _ = tokio::time::timeout(Duration::from_secs(10), rx).await?;
-
-                        // 2. Auth if configured
-                        if let (Some(id), Some(secret)) = (&client_id, &client_secret) {
-                            let auth_id = 800_000 + conn_id as i64;
-                            let mut auth_val = serde_json::to_value(&AuthRequest::credential_auth(id, secret))?;
-                            if let Some(obj) = auth_val.as_object_mut() {
-                                obj.insert("jsonrpc".to_string(), json!("2.0"));
-                                obj.insert("id".to_string(), json!(auth_id));
-                            }
-                            let (tx, rx) = oneshot::channel();
-                            el_payload_tx.send_async(auth_val.to_string()).await?;
-                            el_responser_tx.send_async((auth_id, tx)).await?;
-                            let resp = tokio::time::timeout(Duration::from_secs(10), rx).await??;
-                            let result: JSONRPCResponse<crate::request::authentication::AuthResponse> = serde_json::from_str(&resp)?;
-                            if let either::Either::Left(auth_resp) = result.result {
-                                *token.write().unwrap() = auth_resp.access_token;
-                            }
-                        }
-
-                        // 3. Re-subscribe all tracked channels (batched)
-                        let channel_list: Vec<String> = channels.into_iter().collect();
-                        if !channel_list.is_empty() {
-                            const BATCH_SIZE: usize = 100;
-                            let mut base_id = 700_000 + conn_id as i64;
-                            for chunk in channel_list.chunks(BATCH_SIZE) {
-                                let sub_id = base_id;
-                                base_id += 1;
-                                let mut sub_val = serde_json::to_value(&PublicSubscribeRequest::new(chunk.to_vec()))?;
-                                if let Some(obj) = sub_val.as_object_mut() {
-                                    obj.insert("jsonrpc".to_string(), json!("2.0"));
-                                    obj.insert("id".to_string(), json!(sub_id));
-                                }
-                                let (tx, rx) = oneshot::channel();
-                                el_payload_tx.send_async(sub_val.to_string()).await?;
-                                el_responser_tx.send_async((sub_id, tx)).await?;
-                                let _ = tokio::time::timeout(Duration::from_secs(30), rx).await?;
-                            }
-                            info!(connection_id = conn_id, "re-subscribed {} channels", channel_list.len());
-                        }
-
-                        Ok::<(), anyhow::Error>(())
-                    }.await;
-                    if let Err(e) = res {
-                        warn!(connection_id = conn_id, error = ?e, "setup task failed, will retry on next reconnect");
+            // ── Layer 1: Connect ─────────────────────────────────────
+            debug!(connection_id = self.id, "connecting via transport");
+            loop {
+                match transport.connect().await {
+                    Ok(()) => {
+                        backoff_secs = 1;
+                        break;
                     }
-                });
+                    Err(e) => {
+                        let jitter = (backoff_secs as f64 * 0.25) as u64;
+                        let jittered = backoff_secs.saturating_sub(jitter)
+                            + ((jitter_seed.wrapping_add(backoff_secs)) % (jitter * 2 + 1));
+                        let delay = jittered.max(1);
+                        warn!(
+                            connection_id = self.id,
+                            error = ?e,
+                            backoff_secs,
+                            delay,
+                            "transport connect failed, retrying"
+                        );
+                        select! {
+                            _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+                            _ = ct.cancelled() => return Ok(()),
+                        }
+                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                    }
+                }
+            }
+            debug!(connection_id = self.id, "transport connected");
+
+            // ── Layer 2: Synchronous setup ───────────────────────────
+            let mut setup_caller = SetupCaller { transport: &mut transport };
+            match protocol.run_setup(&mut setup_caller).await {
+                Ok(()) => {
+                    setup_backoff_secs = 5; // reset on success
+                }
+                Err(e) => {
+                    warn!(
+                        connection_id = self.id,
+                        error = ?e,
+                        setup_backoff_secs,
+                        "setup failed, reconnecting"
+                    );
+                    if setup_backoff_secs >= MAX_SETUP_BACKOFF_SECS {
+                        tracing::error!(
+                            connection_id = self.id,
+                            "setup repeatedly failed after max backoff, exiting to trigger pod restart"
+                        );
+                        std::process::exit(1);
+                    }
+                    select! {
+                        _ = tokio::time::sleep(Duration::from_secs(setup_backoff_secs)) => {}
+                        _ = ct.cancelled() => return Ok(()),
+                    }
+                    setup_backoff_secs = (setup_backoff_secs * 2).min(MAX_SETUP_BACKOFF_SECS);
+                    continue;
+                }
             }
 
-            // Main eventloop
+            // ── Main eventloop ───────────────────────────────────────
+            let mut responser_map: HashMap<i64, oneshot::Sender<String>> = HashMap::new();
+            const MAX_MAP_SIZE: usize = 1000;
+
             loop {
                 select! {
-                    err = err_rx.recv_async() => {
-                        let err = err.with_context(|| "connection setup error")?;
-                        return Err(err);
-                    }
+                    biased;
+
                     () = ct.cancelled() => {
                         return Ok(());
                     }
+
+                    // ── API response routing ─────────────────────────
+                    Ok((id, responser)) = self.responser_rx.recv_async() => {
+                        if responser_map.len() >= MAX_MAP_SIZE {
+                            warn!(connection_id = self.id,
+                                map_size = responser_map.len(),
+                                "responser_map too large, clearing");
+                            responser_map.clear();
+                        }
+                        responser_map.insert(id, responser);
+                    }
+
+                    // ── Outgoing API message ─────────────────────────
                     msg = self.message_rx.recv_async() => {
                         let msg = msg.with_context(|| "connection recv message")?;
-                        ws.send(Message::Text(msg)).await.with_context(|| "connection ws send")?;
-                    }
-                    msg = el_payload_rx.recv_async() => {
-                        let msg = msg.with_context(|| "connection recv el payload")?;
-                        ws.send(Message::Text(msg)).await.with_context(|| "connection ws send el")?;
-                    }
-                    Ok((id, responser)) = self.responser_rx.recv_async() => {
-                        if let Some(text) = message_map.remove(&id) {
-                            let _ = responser.send(text);
-                        } else {
-                            responser_map.insert(id, responser);
+                        if let Err(e) = transport.send(msg).await {
+                            warn!(connection_id = self.id,
+                                error = ?e,
+                                "transport send error, reconnecting");
+                            break;
                         }
                     }
-                    Ok((id, responser)) = el_responser_rx.recv_async() => {
-                        if let Some(text) = message_map.remove(&id) {
-                            let _ = responser.send(text);
-                        } else {
-                            responser_map.insert(id, responser);
-                        }
-                    }
-                    next = ws.next() => {
-                        let message = match next {
-                            Some(Err(e)) => {
-                                warn!(connection_id = self.id, "ws error: {}", e);
+
+                    // ── Incoming message dispatch ────────────────────
+                    result = transport.recv() => {
+                        let text = match result {
+                            Ok(Some(t)) => t,
+                            Ok(None) => {
+                                debug!(connection_id = self.id, "transport closed");
                                 break;
                             }
-                            Some(Ok(m)) => m,
-                            None => {
-                                debug!(connection_id = self.id, "ws closed");
+                            Err(e) => {
+                                warn!(connection_id = self.id,
+                                    error = ?e,
+                                    "transport recv error, reconnecting");
                                 break;
                             }
                         };
 
-                        let text = match message {
-                            Message::Text(t) => t,
-                            Message::Binary(b) => String::from_utf8(b)?,
-                            Message::Close { code, reason } => {
-                                debug!(connection_id = self.id, "ws close(code={}, reason={})", code, reason);
-                                break;
-                            }
-                            Message::Pong(_) => continue,
-                            _ => continue,
+                        // Classify: response (has "id") vs notification (has "method")
+                        let value: serde_json::Value = match serde_json::from_str(&text) {
+                            Ok(v) => v,
+                            Err(_) => continue,
                         };
 
-                        let value: Value = serde_json::from_str(&text)
-                            .with_context(|| "connection decode json")?;
-
-                        // Handle API response (has "id" field)
                         if let Some(id) = value.get("id").and_then(|v| v.as_i64()) {
+                            // JSON-RPC response → route to waiting caller
                             if let Some(responser) = responser_map.remove(&id) {
                                 let _ = responser.send(text);
                             } else {
-                                message_map.insert(id, text);
+                                warn!(connection_id = self.id, id, "no waiter for response");
                             }
-                            continue;
-                        }
-
-                        // Handle subscription/notification messages
-                        if let Some(method) = value.get("method").and_then(|v| v.as_str()) {
-                            match method {
-                                "heartbeat" => {
-                                    let test_id = 600_000 + self.id as i64;
-                                    let test_payload = json!({
-                                        "jsonrpc": "2.0",
-                                        "id": test_id,
-                                        "method": "public/test",
-                                        "params": {}
-                                    }).to_string();
-                                    let _ = el_payload_tx.send_async(test_payload).await;
-                                }
-                                "subscription" => {
-                                    if self.subscription_tx.send_async(text).await.is_err() {
-                                        warn!(connection_id = self.id, "subscription rx dropped");
+                        } else if let Some(method) = value.get("method").and_then(|v| v.as_str()) {
+                            // JSON-RPC notification → dispatch to Protocol handler
+                            let actions = protocol.handle_notification(method, &text);
+                            for action in actions {
+                                match action {
+                                    OutgoingAction::Send(payload) => {
+                                        if let Err(e) = crate::jsonrpc::validate_jsonrpc_request(&payload) {
+                                            warn!(connection_id = self.id,
+                                                error = ?e,
+                                                payload = %payload,
+                                                "invalid JSON-RPC request (OutgoingAction::Send)");
+                                        }
+                                        if let Err(e) = transport.send(payload).await {
+                                            warn!(connection_id = self.id,
+                                                error = ?e,
+                                                "transport send (notification response) failed");
+                                        }
+                                    }
+                                    OutgoingAction::ExpectResponse(payload, id) => {
+                                        if let Err(e) = crate::jsonrpc::validate_jsonrpc_request(&payload) {
+                                            warn!(connection_id = self.id,
+                                                error = ?e,
+                                                payload = %payload,
+                                                "invalid JSON-RPC request (OutgoingAction::ExpectResponse)");
+                                        }
+                                        // Register a dummy waiter so the response
+                                        // doesn't trigger "no waiter for response"
+                                        let (tx, _rx) = oneshot::channel();
+                                        responser_map.insert(id, tx);
+                                        if let Err(e) = transport.send(payload).await {
+                                            warn!(connection_id = self.id,
+                                                error = ?e,
+                                                "transport send (heartbeat) failed");
+                                        }
                                     }
                                 }
-                                _ => {
-                                    warn!(connection_id = self.id, "unknown method: {}", method);
-                                }
                             }
+                        } else {
+                            warn!(connection_id = self.id, "unrecognized message (no id or method)");
                         }
                     }
                 }
             }
-            // Loop continues → reconnect
+            // Inner loop break → reconnect
         }
     }
 }
 
 #[async_trait]
-impl Runner for Connection {
+impl JsonRpcCaller for Connection {
+    async fn call(&mut self, payload: &str, timeout: Duration) -> Result<String> {
+        // Extract id from the JSON-RPC payload for correlation
+        let value: serde_json::Value =
+            serde_json::from_str(payload).with_context(|| "JsonRpcCaller: invalid JSON payload")?;
+        let id = value
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .with_context(|| "JsonRpcCaller: payload missing 'id'")?;
+
+        let (responser_tx, responser_rx) = oneshot::channel();
+
+        self.message_tx
+            .send_async(payload.to_string())
+            .await
+            .with_context(|| "JsonRpcCaller: send payload")?;
+
+        self.responser_tx
+            .send_async((id, responser_tx))
+            .await
+            .with_context(|| "JsonRpcCaller: register responser")?;
+
+        let resp = tokio::time::timeout(timeout, responser_rx)
+            .await
+            .map_err(|_| anyhow::Error::from(crate::errors::DeribitError::RequestTimeout))
+            .with_context(|| "JsonRpcCaller: timeout")?
+            .with_context(|| "JsonRpcCaller: responser dropped")?;
+
+        Ok(resp)
+    }
+}
+
+#[async_trait]
+impl nq_app::runner::Runner for Connection {
     async fn run(&self, canceltoken: CancellationToken) -> Result<()> {
         info!(connection_id = self.id, "connection is running");
         self.eventloop(canceltoken).await?;
@@ -454,14 +567,19 @@ pub struct ConnectionConfig {
     pub client_id: Option<String>,
     #[builder(default)]
     pub client_secret: Option<String>,
-    /// Capacity of the subscription message channel (Deribit → consumer).
-    /// When full, the WS reader blocks, providing natural backpressure.
-    #[builder(default = "10000")]
-    pub subscription_channel_capacity: usize,
     /// Capacity of the outgoing message channel (producer → WS writer).
     #[builder(default = "1000")]
     pub message_channel_capacity: usize,
     /// Capacity of the API response routing channel.
     #[builder(default = "1000")]
     pub responser_channel_capacity: usize,
+    /// WebSocket-level ping interval in seconds.
+    /// Sends Ping frames at this interval to detect dead connections.
+    /// Default: 15 seconds.
+    #[builder(default = "Some(15)")]
+    pub ping_interval: Option<u64>,
+    /// Maximum time to wait for a Pong before declaring the connection dead.
+    /// Default: 2 × ping_interval.
+    #[builder(default)]
+    pub pong_timeout: Option<u64>,
 }

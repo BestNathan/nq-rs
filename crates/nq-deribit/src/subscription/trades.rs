@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use crate::gen_channel;
 use crate::model::currency::Currency;
 use crate::model::instrument::InstrumentKind;
 use crate::model::interval::Interval;
-use crate::gen_channel;
 
 use crate::model::{direction::Direction, liquidation::LiquidationType};
 
@@ -32,13 +32,7 @@ pub struct TradesData {
 }
 
 gen_channel!(TradesByInstrumentChannel, "trades", String, Interval);
-gen_channel!(
-    TradesByKindChannel,
-    "trades",
-    InstrumentKind,
-    Currency,
-    Interval
-);
+gen_channel!(TradesByKindChannel, "trades", InstrumentKind, Currency, Interval);
 
 impl std::fmt::Display for TradesByInstrumentChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

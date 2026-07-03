@@ -1,0 +1,16 @@
+[package]
+edition = "2024"
+name = "nq-observability"
+version = "0.1.0"
+
+[dependencies]
+anyhow = {workspace = true}
+opentelemetry = "0.28"
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic", "metrics", "logs", "trace"] }
+opentelemetry-appender-tracing = "0.28"
+tokio = {workspace = true}
+tokio-metrics = "0.5"
+tracing = {workspace = true}
+tracing-opentelemetry = "0.29"
+tracing-subscriber = {workspace = true, features = ["env-filter"]}

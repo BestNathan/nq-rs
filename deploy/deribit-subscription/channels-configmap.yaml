@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deribit-subscription-channels
+  labels:
+    app: deribit-subscription
+data:
+  channels.txt: |
+    markprice.options.btc_usd
+    markprice.options.eth_usd
+    deribit_price_index.eth_usd
+    deribit_price_index.btc_usd
+    deribit_volatility_index.eth_usd
+    deribit_volatility_index.btc_usd
+    deribit_price_statistics.btc_usd
+    deribit_price_statistics.eth_usd
+    trades.option.BTC.raw
+    trades.future.BTC.raw
+    trades.spot.BTC.raw
+    trades.option.ETH.raw
+    trades.future.ETH.raw
+    trades.spot.ETH.raw

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{model::index::IndexName, gen_channel};
+use crate::{gen_channel, model::index::IndexName};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct EstimatedExpirationPriceData {
@@ -11,11 +11,7 @@ pub struct EstimatedExpirationPriceData {
     pub total_ticks: Option<f64>,
 }
 
-gen_channel!(
-    EstimatedExpirationPriceChannel,
-    "estimated_expiration_price",
-    IndexName
-);
+gen_channel!(EstimatedExpirationPriceChannel, "estimated_expiration_price", IndexName);
 
 impl std::fmt::Display for EstimatedExpirationPriceChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

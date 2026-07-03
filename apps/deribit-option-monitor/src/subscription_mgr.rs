@@ -17,6 +17,12 @@ use tracing::{debug, info, warn};
 
 use crate::fetcher::InstrumentFetcher;
 
+pub struct SubscriptionConfig {
+    pub currencies: Vec<Currency>,
+    pub interval: Interval,
+    pub poll_interval_secs: u64,
+}
+
 pub struct SubscriptionManager {
     pool: Arc<ConnectionPool>,
     fetcher: Arc<InstrumentFetcher>,
@@ -30,17 +36,15 @@ impl SubscriptionManager {
     pub fn new(
         pool: Arc<ConnectionPool>,
         fetcher: Arc<InstrumentFetcher>,
-        currencies: Vec<Currency>,
-        interval: Interval,
-        poll_interval_secs: u64,
+        config: SubscriptionConfig,
     ) -> Self {
         Self {
             pool,
             fetcher,
             tracked_options: Arc::new(RwLock::new(HashSet::new())),
-            currencies,
-            interval,
-            poll_interval_secs,
+            currencies: config.currencies,
+            interval: config.interval,
+            poll_interval_secs: config.poll_interval_secs,
         }
     }
 
@@ -54,25 +58,26 @@ impl SubscriptionManager {
     }
 
     async fn subscribe_new_options(&self, instrument_names: &[String]) -> Result<()> {
-        let mut tracked = self.tracked_options.write().unwrap();
-        let truly_new: Vec<String> = instrument_names
-            .iter()
-            .filter(|n| !tracked.contains(*n))
-            .cloned()
-            .collect();
+        let (truly_new, channels) = {
+            let tracked = self.tracked_options.write().unwrap();
+            let truly_new: Vec<String> =
+                instrument_names.iter().filter(|n| !tracked.contains(*n)).cloned().collect();
 
-        if truly_new.is_empty() {
-            return Ok(());
-        }
+            if truly_new.is_empty() {
+                return Ok(());
+            }
 
-        let channels: Vec<String> = truly_new
-            .iter()
-            .map(|name| format!("ticker.{}.{}", name, self.interval))
-            .collect();
+            let channels: Vec<String> =
+                truly_new.iter().map(|name| format!("ticker.{}.{}", name, self.interval)).collect();
+
+            (truly_new, channels)
+        }; // lock dropped before await
 
         info!(count = channels.len(), "subscribing to new option tickers");
         self.pool.subscribe(channels).await?;
 
+        // Re-acquire lock for update
+        let mut tracked = self.tracked_options.write().unwrap();
         tracked.extend(truly_new);
         info!(total_tracked = tracked.len(), "tracked options updated");
         Ok(())
@@ -174,34 +179,38 @@ impl Runner for SubscriptionManager {
         let tracked2 = tracked.clone();
         let pool2 = pool.clone();
         let interval2 = interval;
-        let conn = pool.first_connection();
-        let sub_rx = conn.subscription_rx();
+        let mut sub_rx = pool.subscribe_to_broadcast();
         tokio::spawn(async move {
             loop {
                 select! {
                     _ = ct2.cancelled() => break,
-                    msg = sub_rx.recv_async() => {
-                        let msg = match msg {
+                    result = sub_rx.recv() => {
+                        let msg = match result {
                             Ok(m) => m,
-                            Err(_) => break,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                debug!("instrument state: broadcast channel closed");
+                                break;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                warn!(skipped = n, "instrument state: lagged behind broadcast");
+                                continue;
+                            }
                         };
-                        if let Ok(sub_msg) = serde_json::from_str::<SubscriptionMessage>(&msg) {
-                            if let SubscriptionParams::Subscribe(params) = sub_msg.params {
-                                if params.channel.starts_with("instrument_state.") {
-                                    if let Ok(state_data) = serde_json::from_value::<InstrumentStateData>(params.data) {
-                                        // Use write lock directly to avoid TOCTOU race
-                                        let should_subscribe = {
-                                            let mut t = tracked2.write().unwrap();
-                                            t.insert(state_data.instrument_name.clone())
-                                        };
-                                        if should_subscribe {
-                                            let channel = format!("ticker.{}.{}", state_data.instrument_name, interval2);
-                                            info!(instrument = state_data.instrument_name, "new option from instrument_state");
-                                            if let Err(e) = pool2.subscribe(vec![channel]).await {
-                                                warn!(error = ?e, "instrument_state subscribe failed");
-                                            }
-                                        }
-                                    }
+                        if let Ok(sub_msg) = serde_json::from_str::<SubscriptionMessage>(&msg)
+                            && let SubscriptionParams::Subscribe(params) = sub_msg.params
+                            && params.channel.starts_with("instrument_state.")
+                            && let Ok(state_data) = serde_json::from_value::<InstrumentStateData>(params.data)
+                        {
+                            // Use write lock directly to avoid TOCTOU race
+                            let should_subscribe = {
+                                let mut t = tracked2.write().unwrap();
+                                t.insert(state_data.instrument_name.clone())
+                            };
+                            if should_subscribe {
+                                let channel = format!("ticker.{}.{}", state_data.instrument_name, interval2);
+                                info!(instrument = state_data.instrument_name, "new option from instrument_state");
+                                if let Err(e) = pool2.subscribe(vec![channel]).await {
+                                    warn!(error = ?e, "instrument_state subscribe failed");
                                 }
                             }
                         }
@@ -211,7 +220,7 @@ impl Runner for SubscriptionManager {
             debug!("instrument state loop done");
         });
 
-        // Task 3: Periodic metrics logging
+        // Task 3: Periodic status logging (every 60 seconds)
         let ct3 = ct.clone();
         let tracked3 = tracked.clone();
         let pool3 = pool.clone();
@@ -219,25 +228,68 @@ impl Runner for SubscriptionManager {
             loop {
                 select! {
                     _ = ct3.cancelled() => break,
-                    _ = sleep(Duration::from_secs(300)) => {
+                    _ = sleep(Duration::from_secs(60)) => {
                         let t_count = tracked3.read().unwrap().len();
                         let conn_count = pool3.connection_count();
                         let conns = pool3.connection_runners();
                         let channel_counts: Vec<usize> = conns.iter().map(|c| c.channel_count()).collect();
+                        let memory_kb = read_memory_kb();
+
                         info!(
                             tracked_options = t_count,
                             connections = conn_count,
                             channel_counts = ?channel_counts,
-                            "periodic metrics"
+                            memory_kb = memory_kb,
+                            "periodic status (1m)"
                         );
                     }
                 }
             }
-            debug!("metrics loop done");
+            debug!("status loop done");
         });
 
         ct.cancelled().await;
         info!("subscription manager done");
         Ok(())
+    }
+}
+
+// ─── Helper functions ─────────────────────────────────────────────
+
+/// Read current process memory usage in KB. Cross-platform:
+/// - Linux: reads VmRSS from /proc/self/status
+/// - macOS: uses `task_info` via libc
+fn read_memory_kb() -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|content| {
+                content
+                    .lines()
+                    .find(|line| line.starts_with("VmRSS:"))
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .and_then(|s| s.parse::<u64>().ok())
+            })
+            .unwrap_or(0)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Use `ps` to get RSS on macOS (no libc dependency needed)
+        use std::process::Command;
+        let pid = std::process::id();
+        Command::new("ps")
+            .args(["-o", "rss=", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        0 // Unsupported platform
     }
 }

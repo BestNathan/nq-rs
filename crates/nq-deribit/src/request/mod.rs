@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
+pub mod authentication;
 pub mod market_data;
 pub mod session_management;
 pub mod subscribe;
 pub mod support;
-pub mod authentication;
 
 pub trait Request: Serialize {
     const METHOD: &'static str;

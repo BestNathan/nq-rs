@@ -16,11 +16,13 @@ spec:
     spec:
       containers:
         - name: deribit-subscription
-          image: ghcr.io/bestnathan/nq-rs/deribit-subscription:latest
+          image: ghcr.io/bestnathan/nq-rs/deribit-subscription:sha-cdc9325
           imagePullPolicy: Always
           env:
             - name: RUST_LOG
               value: info
+            - name: EMQX_HOST
+              value: emqx-prod-nodeport.emqx.svc.cluster.local
             - name: ALL_PROXY
               value: http://192.168.2.98:8890
             - name: HTTPS_PROXY
@@ -35,6 +37,12 @@ spec:
                 secretKeyRef:
                   name: deribit-subscription-secrets
                   key: DERIBIT_CLIENT_SECRET
+            - name: DERIBIT_SUBSCRIPTION_CHANNELS_FILE
+              value: /etc/deribit-subscription/channels.txt
+          volumeMounts:
+            - name: channels
+              mountPath: /etc/deribit-subscription
+              readOnly: true
           resources:
             requests:
               memory: "128Mi"
@@ -42,6 +50,10 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "500m"
+      volumes:
+        - name: channels
+          configMap:
+            name: deribit-subscription-channels
       imagePullSecrets:
         - name: ghcr-bestnathan
       nodeSelector:

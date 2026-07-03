@@ -1,11 +1,7 @@
 use crate::impl_request;
 use serde::{Deserialize, Serialize};
 
-impl_request!(
-    SetHeartbeatRequest,
-    SetHeartbeatResponse,
-    "public/set_heartbeat"
-);
+impl_request!(SetHeartbeatRequest, SetHeartbeatResponse, "public/set_heartbeat");
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct SetHeartbeatRequest {
