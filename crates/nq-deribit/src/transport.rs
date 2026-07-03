@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow;
 use async_trait::async_trait;
@@ -69,11 +69,6 @@ pub struct WsTransportImpl {
     url: String,
     /// Current WebSocket connection. None until `connect()` succeeds.
     ws: Option<WebSocket>,
-    /// How often to send Ping frames (configured by ConnectionConfig::ping_interval).
-    ping_interval: Duration,
-    /// Maximum time to wait for a Pong response before declaring the connection dead.
-    /// Defaults to 2 × ping_interval.
-    pong_timeout: Duration,
     /// Timestamp of the most recent Pong received. Updated in recv().
     last_pong: Option<Instant>,
     /// Connection ID for logging.
@@ -81,24 +76,9 @@ pub struct WsTransportImpl {
 }
 
 impl WsTransportImpl {
-    pub fn new(
-        client: reqwest::Client,
-        url: String,
-        ping_interval: Duration,
-        pong_timeout: Duration,
-        conn_id: usize,
-    ) -> Self {
-        Self {
-            client,
-            url,
-            ws: None,
-            ping_interval,
-            pong_timeout,
-            last_pong: None,
-            conn_id,
-        }
+    pub fn new(client: reqwest::Client, url: String, conn_id: usize) -> Self {
+        Self { client, url, ws: None, last_pong: None, conn_id }
     }
-
 }
 
 #[async_trait]
@@ -131,21 +111,13 @@ impl Transport for WsTransportImpl {
     }
 
     async fn send(&mut self, text: String) -> Result<(), TransportError> {
-        let ws = self
-            .ws
-            .as_mut()
-            .ok_or(TransportError::NotConnected)?;
+        let ws = self.ws.as_mut().ok_or(TransportError::NotConnected)?;
 
-        ws.send(Message::Text(text))
-            .await
-            .map_err(|e| TransportError::SendFailed(e.into()))
+        ws.send(Message::Text(text)).await.map_err(|e| TransportError::SendFailed(e.into()))
     }
 
     async fn recv(&mut self) -> Result<Option<String>, TransportError> {
-        let ws = self
-            .ws
-            .as_mut()
-            .ok_or(TransportError::NotConnected)?;
+        let ws = self.ws.as_mut().ok_or(TransportError::NotConnected)?;
 
         // ── Read next message (no proactive ping — Deribit uses
         //    JSON-RPC heartbeat via public/set_heartbeat instead) ─────
@@ -239,13 +211,7 @@ mod tests {
     #[test]
     fn test_transport_new() {
         let client = reqwest::Client::new();
-        let t = WsTransportImpl::new(
-            client,
-            "wss://example.com/ws".into(),
-            Duration::from_secs(15),
-            Duration::from_secs(30),
-            0,
-        );
+        let t = WsTransportImpl::new(client, "wss://example.com/ws".into(), 0);
         assert!(!t.is_connected());
     }
 
@@ -253,13 +219,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_not_connected() {
         let client = reqwest::Client::new();
-        let mut t = WsTransportImpl::new(
-            client,
-            "wss://example.com/ws".into(),
-            Duration::from_secs(15),
-            Duration::from_secs(30),
-            0,
-        );
+        let mut t = WsTransportImpl::new(client, "wss://example.com/ws".into(), 0);
         let result = t.send("hello".into()).await;
         assert!(result.is_err());
         match result {
@@ -272,13 +232,7 @@ mod tests {
     #[tokio::test]
     async fn test_recv_not_connected() {
         let client = reqwest::Client::new();
-        let mut t = WsTransportImpl::new(
-            client,
-            "wss://example.com/ws".into(),
-            Duration::from_secs(15),
-            Duration::from_secs(30),
-            0,
-        );
+        let mut t = WsTransportImpl::new(client, "wss://example.com/ws".into(), 0);
         let result = t.recv().await;
         assert!(result.is_err());
     }
@@ -287,13 +241,7 @@ mod tests {
     #[tokio::test]
     async fn test_close_not_connected() {
         let client = reqwest::Client::new();
-        let mut t = WsTransportImpl::new(
-            client,
-            "wss://example.com/ws".into(),
-            Duration::from_secs(15),
-            Duration::from_secs(30),
-            0,
-        );
+        let mut t = WsTransportImpl::new(client, "wss://example.com/ws".into(), 0);
         assert!(t.close().await.is_ok());
     }
 }

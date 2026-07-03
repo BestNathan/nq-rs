@@ -22,10 +22,8 @@ use crate::metrics::meter;
 /// Interval: `TOKIO_METRICS_INTERVAL_SECS` env var, default 60s.
 /// Returns a [`tokio::task::JoinHandle`] that resolves on shutdown.
 pub fn spawn_tokio_metrics() -> tokio::task::JoinHandle<()> {
-    let interval_secs: u64 = env::var("TOKIO_METRICS_INTERVAL_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(60);
+    let interval_secs: u64 =
+        env::var("TOKIO_METRICS_INTERVAL_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(60);
     let handle = tokio::runtime::Handle::current();
     let monitor = RuntimeMonitor::new(&handle);
     let m = meter("tokio");
@@ -47,10 +45,7 @@ fn record_metrics(
         .u64_gauge("tokio.global_queue_depth")
         .with_description("Tasks scheduled in the runtime's global queue")
         .build();
-    let workers = m
-        .u64_gauge("tokio.workers")
-        .with_description("Number of worker threads")
-        .build();
+    let workers = m.u64_gauge("tokio.workers").with_description("Number of worker threads").build();
 
     // ── Counters ─────────────────────────────────────────────────────
     let busy_secs = m

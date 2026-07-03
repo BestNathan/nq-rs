@@ -1,26 +1,10 @@
 use crate::impl_request;
 use serde::{Deserialize, Serialize};
 
-impl_request!(
-    PublicSubscribeRequest,
-    SubscribeResponse,
-    "public/subscribe"
-);
-impl_request!(
-    PrivateSubscribeRequest,
-    SubscribeResponse,
-    "private/subscribe"
-);
-impl_request!(
-    PublicUnsubscribeRequest,
-    UnsubscribeResponse,
-    "public/unsubscribe"
-);
-impl_request!(
-    PrivateUnsubscribeRequest,
-    UnsubscribeResponse,
-    "private/unsubscribe"
-);
+impl_request!(PublicSubscribeRequest, SubscribeResponse, "public/subscribe");
+impl_request!(PrivateSubscribeRequest, SubscribeResponse, "private/subscribe");
+impl_request!(PublicUnsubscribeRequest, UnsubscribeResponse, "public/unsubscribe");
+impl_request!(PrivateUnsubscribeRequest, UnsubscribeResponse, "private/unsubscribe");
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct PublicSubscribeRequest {
@@ -29,9 +13,7 @@ pub struct PublicSubscribeRequest {
 
 impl PublicSubscribeRequest {
     pub fn new(channels: Vec<String>) -> Self {
-        Self {
-            channels: channels,
-        }
+        Self { channels }
     }
 }
 
@@ -42,9 +24,7 @@ pub struct PrivateSubscribeRequest {
 
 impl PrivateSubscribeRequest {
     pub fn new(channels: Vec<String>) -> Self {
-        Self {
-            channels: channels,
-        }
+        Self { channels }
     }
 }
 
@@ -58,9 +38,7 @@ pub struct PublicUnsubscribeRequest {
 
 impl PublicUnsubscribeRequest {
     pub fn new(channels: Vec<String>) -> Self {
-        Self {
-            channels: channels,
-        }
+        Self { channels }
     }
 }
 
@@ -71,9 +49,7 @@ pub struct PrivateUnsubscribeRequest {
 
 impl PrivateUnsubscribeRequest {
     pub fn new(channels: Vec<String>) -> Self {
-        Self {
-            channels: channels,
-        }
+        Self { channels }
     }
 }
 

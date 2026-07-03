@@ -22,22 +22,20 @@ pub fn array_map(record: &SmartModuleRecord) -> Result<Vec<(Option<RecordData>, 
         .unwrap()
         .as_array()
         .unwrap()
-        .into_iter()
+        .iter()
         .map(|value| value.as_array().unwrap())
         .map(|arr| {
             format!(
                 "deribit_rv,index_name={} rv={} {}000000",
                 INDEX_NAME.get().unwrap(),
                 arr.get(1).unwrap().as_f64().unwrap(),
-                arr.get(0).unwrap().as_f64().unwrap()
+                arr.first().unwrap().as_f64().unwrap()
             )
         })
         .collect::<Vec<String>>();
 
     // Create one record from each JSON string to send
-    let kvs: Vec<(Option<RecordData>, RecordData)> = strings
-        .into_iter()
-        .map(|s| (None, RecordData::from(s)))
-        .collect();
+    let kvs: Vec<(Option<RecordData>, RecordData)> =
+        strings.into_iter().map(|s| (None, RecordData::from(s))).collect();
     Ok(kvs)
 }

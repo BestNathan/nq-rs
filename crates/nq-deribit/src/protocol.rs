@@ -38,6 +38,14 @@ pub enum OutgoingAction {
 
 // ─── ProtocolHandler ─────────────────────────────────────────────────
 
+/// Non-shared configuration for [`ProtocolHandler`].
+pub struct ProtocolConfig {
+    pub heartbeat_interval: u64,
+    pub conn_id: usize,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+}
+
 /// Layer 2: JSON-RPC / Deribit protocol handler.
 ///
 /// Knows about JSON-RPC framing, Deribit request/response format,
@@ -58,19 +66,16 @@ impl ProtocolHandler {
         token: Arc<RwLock<Option<String>>>,
         channels: Arc<RwLock<HashSet<String>>>,
         broadcast_tx: Option<tokio::sync::broadcast::Sender<String>>,
-        heartbeat_interval: u64,
-        conn_id: usize,
-        client_id: Option<String>,
-        client_secret: Option<String>,
+        config: ProtocolConfig,
     ) -> Self {
         Self {
             token,
             channels,
             broadcast_tx,
-            heartbeat_interval,
-            conn_id,
-            client_id,
-            client_secret,
+            heartbeat_interval: config.heartbeat_interval,
+            conn_id: config.conn_id,
+            client_id: config.client_id,
+            client_secret: config.client_secret,
         }
     }
 
@@ -81,10 +86,7 @@ impl ProtocolHandler {
     ///   1. Set heartbeat (liveness probe, 10s timeout, fatal)
     ///   2. Authenticate (10s timeout, non-fatal)
     ///   3. Re-subscribe all tracked channels (60s/batch timeout, fatal)
-    pub async fn run_setup(
-        &self,
-        caller: &mut dyn JsonRpcCaller,
-    ) -> Result<()> {
+    pub async fn run_setup(&self, caller: &mut dyn JsonRpcCaller) -> Result<()> {
         let conn_id = self.conn_id;
 
         // ── 1. Set heartbeat (liveness probe) ───────────────────────
@@ -93,31 +95,30 @@ impl ProtocolHandler {
             "id": crate::jsonrpc::global_id_generator().next_id(),
             "method": "public/set_heartbeat",
             "params": { "interval": self.heartbeat_interval }
-        }).to_string();
-        caller.call(&hb_payload, Duration::from_secs(10))
+        })
+        .to_string();
+        caller
+            .call(&hb_payload, Duration::from_secs(10))
             .await
             .with_context(|| "heartbeat probe failed")?;
         debug!(connection_id = conn_id, "heartbeat set");
 
         // ── 2. Auth (non-fatal) ─────────────────────────────────────
-        if let (Some(client_id), Some(client_secret)) =
-            (&self.client_id, &self.client_secret)
-        {
-            let req = JSPNRPCRequest::<AuthRequest>::from(
-                AuthRequest::credential_auth(client_id, client_secret),
-            );
+        if let (Some(client_id), Some(client_secret)) = (&self.client_id, &self.client_secret) {
+            let req = JSPNRPCRequest::<AuthRequest>::from(AuthRequest::credential_auth(
+                client_id,
+                client_secret,
+            ));
             let auth_payload = serde_json::to_string(&req).context("auth serialize")?;
             match caller.call(&auth_payload, Duration::from_secs(10)).await {
                 Ok(resp) => {
                     if let Ok(result) = serde_json::from_str::<
                         JSONRPCResponse<crate::request::authentication::AuthResponse>,
                     >(&resp)
+                        && let either::Either::Left(auth_resp) = result.result
                     {
-                        if let either::Either::Left(auth_resp) = result.result {
-                            *self.token.write().unwrap() =
-                                auth_resp.access_token;
-                            info!(connection_id = conn_id, "authenticated");
-                        }
+                        *self.token.write().unwrap() = auth_resp.access_token;
+                        info!(connection_id = conn_id, "authenticated");
                     }
                 }
                 Err(e) => {
@@ -127,8 +128,7 @@ impl ProtocolHandler {
         }
 
         // ── 3. Re-subscribe all tracked channels (fatal) ────────────
-        let channel_list: Vec<String> =
-            self.channels.read().unwrap().iter().cloned().collect();
+        let channel_list: Vec<String> = self.channels.read().unwrap().iter().cloned().collect();
         if !channel_list.is_empty() {
             self.resubscribe_via_caller(caller, &channel_list)
                 .await
@@ -152,13 +152,11 @@ impl ProtocolHandler {
         let mut done = 0usize;
 
         for chunk in channel_list.chunks(BATCH_SIZE) {
-            let req = JSPNRPCRequest::<PublicSubscribeRequest>::from(
-                PublicSubscribeRequest::new(chunk.to_vec()),
-            );
+            let req = JSPNRPCRequest::<PublicSubscribeRequest>::from(PublicSubscribeRequest::new(
+                chunk.to_vec(),
+            ));
             let sub_payload = serde_json::to_string(&req)?;
-            caller
-                .call(&sub_payload, Duration::from_secs(60))
-                .await?;
+            caller.call(&sub_payload, Duration::from_secs(60)).await?;
             done += chunk.len();
             info!(
                 connection_id = self.conn_id,
@@ -166,14 +164,10 @@ impl ProtocolHandler {
                 "resubscribed batch"
             );
             if done < total {
-                tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS))
-                    .await;
+                tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
             }
         }
-        info!(
-            connection_id = self.conn_id,
-            "re-subscribed {} channels", total
-        );
+        info!(connection_id = self.conn_id, "re-subscribed {} channels", total);
         Ok(())
     }
 
@@ -215,10 +209,7 @@ impl ProtocolHandler {
                 Vec::new()
             }
             _ => {
-                warn!(
-                    connection_id = self.conn_id,
-                    "unknown notification method: {}", method
-                );
+                warn!(connection_id = self.conn_id, "unknown notification method: {}", method);
                 Vec::new()
             }
         }
@@ -239,23 +230,15 @@ mod tests {
 
     impl MockCaller {
         fn new() -> Self {
-            Self {
-                responses: Mutex::new(std::collections::VecDeque::new()),
-            }
+            Self { responses: Mutex::new(std::collections::VecDeque::new()) }
         }
 
         fn queue_ok(&self, text: &str) {
-            self.responses
-                .lock()
-                .unwrap()
-                .push_back(Ok(text.to_string()));
+            self.responses.lock().unwrap().push_back(Ok(text.to_string()));
         }
 
         fn queue_err(&self, err: &str) {
-            self.responses
-                .lock()
-                .unwrap()
-                .push_back(Err(anyhow::anyhow!("{}", err)));
+            self.responses.lock().unwrap().push_back(Err(anyhow::anyhow!("{}", err)));
         }
     }
 
@@ -275,10 +258,12 @@ mod tests {
             Arc::new(RwLock::new(None)),
             Arc::new(RwLock::new(HashSet::new())),
             None,
-            30,
-            0,
-            None,
-            None,
+            ProtocolConfig {
+                heartbeat_interval: 30,
+                conn_id: 0,
+                client_id: None,
+                client_secret: None,
+            },
         )
     }
 
@@ -344,10 +329,12 @@ mod tests {
             Arc::new(RwLock::new(None)),
             channels,
             None,
-            30,
-            0,
-            None,
-            None,
+            ProtocolConfig {
+                heartbeat_interval: 30,
+                conn_id: 0,
+                client_id: None,
+                client_secret: None,
+            },
         );
 
         let mut caller = MockCaller::new();

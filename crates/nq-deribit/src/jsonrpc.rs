@@ -138,9 +138,7 @@ pub struct DefaultIDGenerator {
 
 impl DefaultIDGenerator {
     pub fn new(initial_value: i64) -> Self {
-        Self {
-            counter: Arc::new(AtomicI64::new(initial_value)),
-        }
+        Self { counter: Arc::new(AtomicI64::new(initial_value)) }
     }
 }
 
@@ -163,10 +161,7 @@ pub fn validate_jsonrpc_request(payload: &str) -> Result<()> {
 
     let obj = val.as_object().context("JSON-RPC request must be an object")?;
 
-    let version = obj
-        .get("jsonrpc")
-        .and_then(|v| v.as_str())
-        .context("missing 'jsonrpc' field")?;
+    let version = obj.get("jsonrpc").and_then(|v| v.as_str()).context("missing 'jsonrpc' field")?;
     anyhow::ensure!(version == "2.0", "jsonrpc version must be '2.0', got '{version}'");
 
     // Must have a method (reject if it's a response with "result"/"error")

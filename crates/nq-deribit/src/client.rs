@@ -21,7 +21,9 @@ use tokio::{select, sync::oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
-#[deprecated(note = "Use Connection + ConnectionPool instead. See connection.rs and pool.rs for the new multi-connection architecture.")]
+#[deprecated(
+    note = "Use Connection + ConnectionPool instead. See connection.rs and pool.rs for the new multi-connection architecture."
+)]
 pub struct Client {
     config: Arc<Config>,
     token: Arc<RwLock<Option<String>>>,
@@ -34,9 +36,7 @@ pub struct Client {
 }
 impl Client {
     pub fn builder() -> ClientBuilder {
-        ClientBuilder {
-            config: ConfigBuilder::default().build().unwrap().into(),
-        }
+        ClientBuilder { config: ConfigBuilder::default().build().unwrap().into() }
     }
 
     fn build_http_client(&self) -> Result<reqwest::Client> {
@@ -49,9 +49,8 @@ impl Client {
     }
 
     async fn connect_websocket(&self) -> Result<WebSocket> {
-        let client = self
-            .build_http_client()
-            .with_context(|| "deribit client build http client")?;
+        let client =
+            self.build_http_client().with_context(|| "deribit client build http client")?;
 
         let res = client
             .get(self.config.url.clone())
@@ -94,9 +93,7 @@ impl Client {
         if self.config.public_subscribe_channels.is_empty() {
             None
         } else {
-            Some(PublicSubscribeRequest::new(
-                self.config.public_subscribe_channels.clone(),
-            ))
+            Some(PublicSubscribeRequest::new(self.config.public_subscribe_channels.clone()))
         }
     }
 
@@ -104,9 +101,7 @@ impl Client {
         if self.config.private_subscribe_channels.is_empty() {
             None
         } else {
-            Some(PrivateSubscribeRequest::new(
-                self.config.private_subscribe_channels.clone(),
-            ))
+            Some(PrivateSubscribeRequest::new(self.config.private_subscribe_channels.clone()))
         }
     }
 
@@ -148,10 +143,8 @@ impl Client {
                             .with_context(|| "deribit client set heartbeat")?;
 
                         if let Some(req) = auth_req {
-                            let res = apiclient
-                                .call(req)
-                                .await
-                                .with_context(|| "deribit client auth")?;
+                            let res =
+                                apiclient.call(req).await.with_context(|| "deribit client auth")?;
 
                             // this token expires_in 31536000(365 days)
                             // currently do not need to handle refresh logic
@@ -174,7 +167,7 @@ impl Client {
 
                         Ok::<(), anyhow::Error>(())
                     }
-                        .await;
+                    .await;
 
                     if let Err(e) = res {
                         err_tx.send_async(e).await.unwrap();
@@ -205,7 +198,7 @@ impl Client {
                     Ok((id, responser)) = self.responser_rx.recv_async() => {
                         trace!("deribit client recv responser");
                         if let Some(text) = message_map.remove(&id) {
-                            if let Err(_) = responser.send(text) {
+                            if responser.send(text).is_err() {
                                 warn!("deribit client missing message responser for id={}", id);
                             }
                         } else {
@@ -277,7 +270,7 @@ impl Client {
                                 }
                             };
 
-                            if let Err(_) = responser.send(text) {
+                            if responser.send(text).is_err() {
                                 warn!("deribit client missing message responser for id={}", id);
                             }
                             continue;
@@ -371,9 +364,11 @@ pub struct ClientBuilder {
 impl ClientBuilder {
     pub fn build(self) -> Result<Client> {
         let cfg = self.config.into_inner();
-        let (subscription_tx, subscription_rx) = flume::bounded::<String>(cfg.subscription_channel_capacity);
+        let (subscription_tx, subscription_rx) =
+            flume::bounded::<String>(cfg.subscription_channel_capacity);
         let (message_tx, message_rx) = flume::bounded::<String>(cfg.message_channel_capacity);
-        let (responser_tx, responser_rx) = flume::bounded::<(i64, oneshot::Sender<String>)>(cfg.responser_channel_capacity);
+        let (responser_tx, responser_rx) =
+            flume::bounded::<(i64, oneshot::Sender<String>)>(cfg.responser_channel_capacity);
 
         Ok(Client {
             config: Arc::new(cfg),
@@ -446,10 +441,7 @@ mod tests {
         {
             let token = canceltoken.clone();
             tt.spawn(async move {
-                client
-                    .run(token)
-                    .await
-                    .map_err(|e| error!("client run error: {:?}", e))
+                client.run(token).await.map_err(|e| error!("client run error: {:?}", e))
             });
         }
 

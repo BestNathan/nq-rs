@@ -89,9 +89,7 @@ pub fn init_telemetry(service_name: &str) -> Result<OTelGuard> {
 
     let otel_trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
     let otel_log_layer =
-        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
-            &logger_provider,
-        );
+        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&logger_provider);
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())

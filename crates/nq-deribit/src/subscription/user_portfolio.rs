@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{model::currency::Currency, gen_channel};
+use crate::{gen_channel, model::currency::Currency};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct UserPortfolioData {

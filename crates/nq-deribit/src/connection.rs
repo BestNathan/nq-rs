@@ -12,14 +12,10 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::jsonrpc::{JSPNRPCRequest, JSONRPCResponse};
-use crate::protocol::{JsonRpcCaller, OutgoingAction, ProtocolHandler};
+use crate::jsonrpc::{JSONRPCResponse, JSPNRPCRequest};
+use crate::protocol::{JsonRpcCaller, OutgoingAction, ProtocolConfig, ProtocolHandler};
 use crate::request::Request;
 use crate::transport::{Transport, WsTransportImpl};
-
-/// WebSocket-level ping interval (seconds). Sends a Ping frame at this interval
-/// to keep the connection alive and detect dead connections early.
-const PING_INTERVAL_SECS: u64 = 15;
 
 // ─── SetupCaller ──────────────────────────────────────────────────────
 
@@ -38,55 +34,37 @@ impl JsonRpcCaller for SetupCaller<'_> {
             .context("SetupCaller: invalid JSON-RPC request")?;
 
         let id = {
-            let value: serde_json::Value = serde_json::from_str(payload)
-                .with_context(|| "SetupCaller: invalid JSON")?;
-            value
-                .get("id")
-                .and_then(|v| v.as_i64())
-                .with_context(|| "SetupCaller: missing id")?
+            let value: serde_json::Value =
+                serde_json::from_str(payload).with_context(|| "SetupCaller: invalid JSON")?;
+            value.get("id").and_then(|v| v.as_i64()).with_context(|| "SetupCaller: missing id")?
         };
 
-        self.transport
-            .send(payload.to_string())
-            .await
-            .with_context(|| "SetupCaller: send")?;
+        self.transport.send(payload.to_string()).await.with_context(|| "SetupCaller: send")?;
 
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            let remaining =
-                deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                return Err(anyhow::Error::from(
-                    crate::errors::DeribitError::RequestTimeout,
-                ));
+                return Err(anyhow::Error::from(crate::errors::DeribitError::RequestTimeout));
             }
 
             let result = tokio::time::timeout(remaining, self.transport.recv())
                 .await
-                .map_err(|_| {
-                    anyhow::Error::from(crate::errors::DeribitError::RequestTimeout)
-                })?;
+                .map_err(|_| anyhow::Error::from(crate::errors::DeribitError::RequestTimeout))?;
 
             let text = match result {
                 Ok(Some(t)) => t,
-                Ok(None) => {
-                    return Err(anyhow::anyhow!(
-                        "SetupCaller: transport closed"
-                    ))
-                }
-                Err(e) => {
-                    return Err(anyhow::Error::new(e)
-                        .context("SetupCaller: transport error"))
-                }
+                Ok(None) => return Err(anyhow::anyhow!("SetupCaller: transport closed")),
+                Err(e) => return Err(anyhow::Error::new(e).context("SetupCaller: transport error")),
             };
 
             let value: serde_json::Value = serde_json::from_str(&text)
                 .with_context(|| "SetupCaller: invalid JSON response")?;
 
-            if let Some(resp_id) = value.get("id").and_then(|v| v.as_i64()) {
-                if resp_id == id {
-                    return Ok(text);
-                }
+            if let Some(resp_id) = value.get("id").and_then(|v| v.as_i64())
+                && resp_id == id
+            {
+                return Ok(text);
             }
             // Non-matching messages (notifications) are discarded during setup.
             // This is acceptable because setup runs before any subscriptions
@@ -121,9 +99,7 @@ impl Connection {
                 .proxy(proxy.clone())
                 .build()
                 .expect("reqwest::Client::build failed"),
-            _ => reqwest::Client::builder()
-                .build()
-                .expect("reqwest::Client::build failed"),
+            _ => reqwest::Client::builder().build().expect("reqwest::Client::build failed"),
         };
 
         let msg_cap = config.message_channel_capacity;
@@ -185,9 +161,7 @@ impl Connection {
         let total = channels.len();
         let mut done = 0usize;
         for chunk in channels.chunks(BATCH_SIZE) {
-            let req = crate::request::subscribe::PublicSubscribeRequest::new(
-                chunk.to_vec(),
-            );
+            let req = crate::request::subscribe::PublicSubscribeRequest::new(chunk.to_vec());
             match self.call_api(req).await {
                 Ok(_) => {
                     done += chunk.len();
@@ -216,8 +190,7 @@ impl Connection {
 
     /// Re-subscribe all channels currently in the tracked set.
     pub async fn resubscribe_all(&self) -> Result<()> {
-        let channels: Vec<String> =
-            self.channels.read().unwrap().iter().cloned().collect();
+        let channels: Vec<String> = self.channels.read().unwrap().iter().cloned().collect();
         if channels.is_empty() {
             return Ok(());
         }
@@ -228,9 +201,7 @@ impl Connection {
         let mut done = 0usize;
         let mut failed = 0;
         for chunk in channels.chunks(BATCH_SIZE) {
-            let req = crate::request::subscribe::PublicSubscribeRequest::new(
-                chunk.to_vec(),
-            );
+            let req = crate::request::subscribe::PublicSubscribeRequest::new(chunk.to_vec());
             match self.call_api(req).await {
                 Ok(_) => {
                     done += chunk.len();
@@ -253,13 +224,7 @@ impl Connection {
                 tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
             }
         }
-        info!(
-            connection_id = self.id,
-            success = done,
-            failed,
-            total,
-            "resubscribe_all done"
-        );
+        info!(connection_id = self.id, success = done, failed, total, "resubscribe_all done");
         Ok(())
     }
 
@@ -269,8 +234,7 @@ impl Connection {
             return Ok(());
         }
 
-        let req =
-            crate::request::subscribe::PublicUnsubscribeRequest::new(channels.clone());
+        let req = crate::request::subscribe::PublicUnsubscribeRequest::new(channels.clone());
         let resp = self.call_api(req).await;
 
         match resp {
@@ -279,11 +243,7 @@ impl Connection {
                 for ch in &channels {
                     set.remove(ch);
                 }
-                debug!(
-                    connection_id = self.id,
-                    "unsubscribed from {} channels",
-                    channels.len()
-                );
+                debug!(connection_id = self.id, "unsubscribed from {} channels", channels.len());
                 Ok(())
             }
             Err(e) => {
@@ -310,10 +270,7 @@ impl Connection {
             if let Some(token) = self.token.read().unwrap().as_ref() {
                 let mut value = serde_json::to_value(&req)?;
                 if let Some(obj) = value.as_object_mut() {
-                    obj.insert(
-                        "access_token".to_string(),
-                        serde_json::json!(token),
-                    );
+                    obj.insert("access_token".to_string(), serde_json::json!(token));
                 }
                 value.to_string()
             } else {
@@ -321,37 +278,25 @@ impl Connection {
             }
         };
 
-        self.message_tx
-            .send_async(payload)
-            .await
-            .with_context(|| "connection send payload")?;
+        self.message_tx.send_async(payload).await.with_context(|| "connection send payload")?;
 
         self.responser_tx
             .send_async((id, responser_tx))
             .await
             .with_context(|| "connection send responser")?;
 
-        let resp = tokio::time::timeout(
-            Duration::from_secs(self.config.request_timeout),
-            responser_rx,
-        )
-        .await
-        .map_err(|_| {
-            anyhow::Error::from(crate::errors::DeribitError::RequestTimeout)
-        })
-        .with_context(|| "connection responser timeout")?
-        .with_context(|| "connection responser recv")?;
+        let resp =
+            tokio::time::timeout(Duration::from_secs(self.config.request_timeout), responser_rx)
+                .await
+                .map_err(|_| anyhow::Error::from(crate::errors::DeribitError::RequestTimeout))
+                .with_context(|| "connection responser timeout")?
+                .with_context(|| "connection responser recv")?;
 
         let result: JSONRPCResponse<R::Response> =
-            serde_json::from_str(&resp)
-                .with_context(|| "connection response serde")?;
+            serde_json::from_str(&resp).with_context(|| "connection response serde")?;
 
         match result.result.map_right(|e| {
-            crate::errors::DeribitError::RemoteError {
-                code: e.code,
-                message: e.message,
-            }
-            .into()
+            crate::errors::DeribitError::RemoteError { code: e.code, message: e.message }.into()
         }) {
             either::Either::Left(v) => Ok(v),
             either::Either::Right(e) => Err(e),
@@ -364,33 +309,20 @@ impl Connection {
         debug!(connection_id = self.id, "connection eventloop begin");
 
         // ── Layer 1: Transport — shared reqwest::Client, one per Connection ──
-        let ping_interval = Duration::from_secs(
-            self.config
-                .ping_interval
-                .unwrap_or(PING_INTERVAL_SECS),
-        );
-        let pong_timeout = Duration::from_secs(
-            self.config
-                .pong_timeout
-                .unwrap_or(ping_interval.as_secs() * 2),
-        );
-        let mut transport = WsTransportImpl::new(
-            self.client.clone(),
-            self.config.url.clone(),
-            ping_interval,
-            pong_timeout,
-            self.id,
-        );
+        let mut transport =
+            WsTransportImpl::new(self.client.clone(), self.config.url.clone(), self.id);
 
         // ── Layer 2: Protocol ────────────────────────────────────────
         let protocol = ProtocolHandler::new(
             self.token.clone(),
             self.channels.clone(),
             self.subscription_broadcast_tx.get().cloned(),
-            self.config.heartbeat_interval,
-            self.id,
-            self.config.client_id.clone(),
-            self.config.client_secret.clone(),
+            ProtocolConfig {
+                heartbeat_interval: self.config.heartbeat_interval,
+                conn_id: self.id,
+                client_id: self.config.client_id.clone(),
+                client_secret: self.config.client_secret.clone(),
+            },
         );
 
         let mut backoff_secs: u64 = 1;
@@ -417,8 +349,7 @@ impl Connection {
                     Err(e) => {
                         let jitter = (backoff_secs as f64 * 0.25) as u64;
                         let jittered = backoff_secs.saturating_sub(jitter)
-                            + ((jitter_seed.wrapping_add(backoff_secs))
-                                % (jitter * 2 + 1));
+                            + ((jitter_seed.wrapping_add(backoff_secs)) % (jitter * 2 + 1));
                         let delay = jittered.max(1);
                         warn!(
                             connection_id = self.id,
@@ -431,17 +362,14 @@ impl Connection {
                             _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
                             _ = ct.cancelled() => return Ok(()),
                         }
-                        backoff_secs =
-                            (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
                     }
                 }
             }
             debug!(connection_id = self.id, "transport connected");
 
             // ── Layer 2: Synchronous setup ───────────────────────────
-            let mut setup_caller = SetupCaller {
-                transport: &mut transport,
-            };
+            let mut setup_caller = SetupCaller { transport: &mut transport };
             match protocol.run_setup(&mut setup_caller).await {
                 Ok(()) => {
                     setup_backoff_secs = 5; // reset on success
@@ -464,15 +392,13 @@ impl Connection {
                         _ = tokio::time::sleep(Duration::from_secs(setup_backoff_secs)) => {}
                         _ = ct.cancelled() => return Ok(()),
                     }
-                    setup_backoff_secs =
-                        (setup_backoff_secs * 2).min(MAX_SETUP_BACKOFF_SECS);
+                    setup_backoff_secs = (setup_backoff_secs * 2).min(MAX_SETUP_BACKOFF_SECS);
                     continue;
                 }
             }
 
             // ── Main eventloop ───────────────────────────────────────
-            let mut responser_map: HashMap<i64, oneshot::Sender<String>> =
-                HashMap::new();
+            let mut responser_map: HashMap<i64, oneshot::Sender<String>> = HashMap::new();
             const MAX_MAP_SIZE: usize = 1000;
 
             loop {
@@ -586,8 +512,8 @@ impl Connection {
 impl JsonRpcCaller for Connection {
     async fn call(&mut self, payload: &str, timeout: Duration) -> Result<String> {
         // Extract id from the JSON-RPC payload for correlation
-        let value: serde_json::Value = serde_json::from_str(payload)
-            .with_context(|| "JsonRpcCaller: invalid JSON payload")?;
+        let value: serde_json::Value =
+            serde_json::from_str(payload).with_context(|| "JsonRpcCaller: invalid JSON payload")?;
         let id = value
             .get("id")
             .and_then(|v| v.as_i64())
@@ -607,9 +533,7 @@ impl JsonRpcCaller for Connection {
 
         let resp = tokio::time::timeout(timeout, responser_rx)
             .await
-            .map_err(|_| {
-                anyhow::Error::from(crate::errors::DeribitError::RequestTimeout)
-            })
+            .map_err(|_| anyhow::Error::from(crate::errors::DeribitError::RequestTimeout))
             .with_context(|| "JsonRpcCaller: timeout")?
             .with_context(|| "JsonRpcCaller: responser dropped")?;
 

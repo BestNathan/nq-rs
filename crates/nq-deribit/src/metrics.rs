@@ -3,7 +3,7 @@
 //! Uses OTel Counters (exported via OTLP to Prometheus) instead of
 //! the previous `AtomicU64` statics. Access via the global `DERIBIT_METRICS` lazy.
 
-use nq_observability::metrics::{meter, Counter};
+use nq_observability::metrics::{Counter, meter};
 use once_cell::sync::Lazy;
 
 /// Global Deribit pipeline metrics. Initialized lazily on first access.

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{model::index::IndexName, gen_channel};
+use crate::{gen_channel, model::index::IndexName};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct MarkPriceOptionsData {

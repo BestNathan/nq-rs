@@ -17,6 +17,12 @@ use tracing::{debug, info, warn};
 
 use crate::fetcher::InstrumentFetcher;
 
+pub struct SubscriptionConfig {
+    pub currencies: Vec<Currency>,
+    pub interval: Interval,
+    pub poll_interval_secs: u64,
+}
+
 pub struct SubscriptionManager {
     pool: Arc<ConnectionPool>,
     fetcher: Arc<InstrumentFetcher>,
@@ -30,17 +36,15 @@ impl SubscriptionManager {
     pub fn new(
         pool: Arc<ConnectionPool>,
         fetcher: Arc<InstrumentFetcher>,
-        currencies: Vec<Currency>,
-        interval: Interval,
-        poll_interval_secs: u64,
+        config: SubscriptionConfig,
     ) -> Self {
         Self {
             pool,
             fetcher,
             tracked_options: Arc::new(RwLock::new(HashSet::new())),
-            currencies,
-            interval,
-            poll_interval_secs,
+            currencies: config.currencies,
+            interval: config.interval,
+            poll_interval_secs: config.poll_interval_secs,
         }
     }
 
@@ -54,25 +58,26 @@ impl SubscriptionManager {
     }
 
     async fn subscribe_new_options(&self, instrument_names: &[String]) -> Result<()> {
-        let mut tracked = self.tracked_options.write().unwrap();
-        let truly_new: Vec<String> = instrument_names
-            .iter()
-            .filter(|n| !tracked.contains(*n))
-            .cloned()
-            .collect();
+        let (truly_new, channels) = {
+            let tracked = self.tracked_options.write().unwrap();
+            let truly_new: Vec<String> =
+                instrument_names.iter().filter(|n| !tracked.contains(*n)).cloned().collect();
 
-        if truly_new.is_empty() {
-            return Ok(());
-        }
+            if truly_new.is_empty() {
+                return Ok(());
+            }
 
-        let channels: Vec<String> = truly_new
-            .iter()
-            .map(|name| format!("ticker.{}.{}", name, self.interval))
-            .collect();
+            let channels: Vec<String> =
+                truly_new.iter().map(|name| format!("ticker.{}.{}", name, self.interval)).collect();
+
+            (truly_new, channels)
+        }; // lock dropped before await
 
         info!(count = channels.len(), "subscribing to new option tickers");
         self.pool.subscribe(channels).await?;
 
+        // Re-acquire lock for update
+        let mut tracked = self.tracked_options.write().unwrap();
         tracked.extend(truly_new);
         info!(total_tracked = tracked.len(), "tracked options updated");
         Ok(())
@@ -191,23 +196,21 @@ impl Runner for SubscriptionManager {
                                 continue;
                             }
                         };
-                        if let Ok(sub_msg) = serde_json::from_str::<SubscriptionMessage>(&msg) {
-                            if let SubscriptionParams::Subscribe(params) = sub_msg.params {
-                                if params.channel.starts_with("instrument_state.") {
-                                    if let Ok(state_data) = serde_json::from_value::<InstrumentStateData>(params.data) {
-                                        // Use write lock directly to avoid TOCTOU race
-                                        let should_subscribe = {
-                                            let mut t = tracked2.write().unwrap();
-                                            t.insert(state_data.instrument_name.clone())
-                                        };
-                                        if should_subscribe {
-                                            let channel = format!("ticker.{}.{}", state_data.instrument_name, interval2);
-                                            info!(instrument = state_data.instrument_name, "new option from instrument_state");
-                                            if let Err(e) = pool2.subscribe(vec![channel]).await {
-                                                warn!(error = ?e, "instrument_state subscribe failed");
-                                            }
-                                        }
-                                    }
+                        if let Ok(sub_msg) = serde_json::from_str::<SubscriptionMessage>(&msg)
+                            && let SubscriptionParams::Subscribe(params) = sub_msg.params
+                            && params.channel.starts_with("instrument_state.")
+                            && let Ok(state_data) = serde_json::from_value::<InstrumentStateData>(params.data)
+                        {
+                            // Use write lock directly to avoid TOCTOU race
+                            let should_subscribe = {
+                                let mut t = tracked2.write().unwrap();
+                                t.insert(state_data.instrument_name.clone())
+                            };
+                            if should_subscribe {
+                                let channel = format!("ticker.{}.{}", state_data.instrument_name, interval2);
+                                info!(instrument = state_data.instrument_name, "new option from instrument_state");
+                                if let Err(e) = pool2.subscribe(vec![channel]).await {
+                                    warn!(error = ?e, "instrument_state subscribe failed");
                                 }
                             }
                         }
@@ -290,4 +293,3 @@ fn read_memory_kb() -> u64 {
         0 // Unsupported platform
     }
 }
-

@@ -24,17 +24,11 @@ pub struct InstrumentFetcher {
 
 impl InstrumentFetcher {
     pub fn new(http_client: Client, rest_base_url: String) -> Self {
-        Self {
-            http_client,
-            rest_base_url,
-        }
+        Self { http_client, rest_base_url }
     }
 
     pub async fn fetch_all_options(&self, currencies: &[Currency]) -> Result<Vec<InstrumentInfo>> {
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let cutoff_ms = (now_secs + MAX_EXPIRY_SECS) * 1000;
 
         let mut all_options = Vec::new();

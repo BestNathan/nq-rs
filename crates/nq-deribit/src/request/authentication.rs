@@ -61,24 +61,6 @@ impl AuthRequest {
         }
     }
 
-    pub fn signature_auth(
-        id: &str,
-        timestamp: &str,
-        signature: &str,
-        nonce: Option<&str>,
-        data: Option<&str>,
-    ) -> AuthRequest {
-        AuthRequest {
-            grant_type: GrantType::ClientSignature,
-            client_id: Some(id.into()),
-            timestamp: Some(timestamp.into()),
-            signature: Some(signature.into()),
-            nonce: nonce.map(|x| x.into()),
-            data: data.map(|x| x.into()),
-            ..Default::default()
-        }
-    }
-
     pub fn refresh_token_auth(refresh_token: &str) -> AuthRequest {
         AuthRequest {
             grant_type: GrantType::RefreshToken,

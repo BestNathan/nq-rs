@@ -2,6 +2,7 @@ pub mod announcements;
 pub mod book;
 pub mod deribit_price_index;
 pub mod deribit_price_ranking;
+pub mod deribit_price_statistics;
 pub mod deribit_volatility_index;
 pub mod estimated_expiration_price;
 pub mod instrument;
@@ -14,7 +15,6 @@ pub mod user_changes;
 pub mod user_orders;
 pub mod user_portfolio;
 pub mod user_trades;
-pub mod deribit_price_statistics;
 
 pub mod channel;
 

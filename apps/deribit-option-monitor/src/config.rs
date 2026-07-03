@@ -21,8 +21,8 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_env() -> Self {
-        let currencies_str = env::var("DERIBIT_OPTION_CURRENCIES")
-            .unwrap_or(DEFAULT_CURRENCIES.to_string());
+        let currencies_str =
+            env::var("DERIBIT_OPTION_CURRENCIES").unwrap_or(DEFAULT_CURRENCIES.to_string());
         let currencies: Vec<Currency> = currencies_str
             .split(',')
             .map(|s| s.trim().to_uppercase())
@@ -46,8 +46,8 @@ impl AppConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_POOL_CAPACITY);
 
-        let rest_base_url = env::var("DERIBIT_REST_URL")
-            .unwrap_or(DEFAULT_REST_BASE_URL.to_string());
+        let rest_base_url =
+            env::var("DERIBIT_REST_URL").unwrap_or(DEFAULT_REST_BASE_URL.to_string());
 
         Self {
             currencies,

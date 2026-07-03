@@ -13,7 +13,7 @@ mod ticker_router;
 
 use config::AppConfig;
 use fetcher::InstrumentFetcher;
-use subscription_mgr::SubscriptionManager;
+use subscription_mgr::{SubscriptionConfig, SubscriptionManager};
 use ticker_router::TickerRouter;
 
 #[tokio::main]
@@ -27,8 +27,7 @@ async fn main() -> Result<()> {
     info!(currencies = ?config.currencies, interval = ?config.ticker_interval, "config loaded");
 
     // 1. Create ConnectionPool
-    let conn_config = ConnectionConfigBuilder::default()
-        .build()?;
+    let conn_config = ConnectionConfigBuilder::default().build()?;
 
     let pool = Arc::new(ConnectionPool::new(PoolConfig {
         capacity_per_connection: config.pool_capacity,
@@ -46,24 +45,23 @@ async fn main() -> Result<()> {
     }
 
     // 3. Create MQTT client (spawns its own eventloop internally)
-    let mqtt_client = nq_mqtt::client::Client::builder()
-        .set_host(nq_env::emqx::host())
-        .build();
+    let mqtt_client = nq_mqtt::client::Client::builder().set_host(nq_env::emqx::host()).build();
     let mqtt_async_client = mqtt_client.inner();
 
     // 4. Create InstrumentFetcher (uses independent HTTP client, not WebSocket)
-    let http_client = reqwest::Client::builder()
-        .build()
-        .expect("create HTTP client for InstrumentFetcher");
+    let http_client =
+        reqwest::Client::builder().build().expect("create HTTP client for InstrumentFetcher");
     let fetcher = Arc::new(InstrumentFetcher::new(http_client, config.rest_base_url.clone()));
 
     // 5. Create SubscriptionManager
     let sub_mgr = Arc::new(SubscriptionManager::new(
         pool.clone(),
         fetcher.clone(),
-        config.currencies.clone(),
-        config.ticker_interval,
-        config.poll_interval_secs,
+        SubscriptionConfig {
+            currencies: config.currencies.clone(),
+            interval: config.ticker_interval,
+            poll_interval_secs: config.poll_interval_secs,
+        },
     ));
 
     // 6. Initialize: fetch all options and subscribe to their tickers
@@ -71,9 +69,8 @@ async fn main() -> Result<()> {
     sub_mgr.initialize().await?;
 
     // 7. Subscribe to instrument_state channels
-    let inst_state_channels: Vec<String> = config.currencies.iter()
-        .map(|c| format!("instrument_state.option.{}", c))
-        .collect();
+    let inst_state_channels: Vec<String> =
+        config.currencies.iter().map(|c| format!("instrument_state.option.{}", c)).collect();
     info!(channels = ?inst_state_channels, "subscribing to instrument_state");
     pool.subscribe(inst_state_channels).await?;
 

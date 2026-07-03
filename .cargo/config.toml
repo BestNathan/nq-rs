@@ -1,2 +1,8 @@
 [build]
-rustflags = ["--cfg", "tokio_unstable"]
+rustflags = [
+    "--cfg",
+    "tokio_unstable",
+
+    # Treat all warnings as errors (workspace crates only — deps already warn-free)
+    "-Dwarnings",
+]

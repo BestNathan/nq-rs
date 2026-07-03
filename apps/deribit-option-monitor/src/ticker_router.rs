@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use nq_app::runner::Runner;
 use nq_deribit::message::{SubscriptionMessage, SubscriptionParams};
-use nq_deribit::metrics;
+
 use nq_deribit::pool::ConnectionPool;
 use nq_deribit::subscription::ticker::TickerData;
 use rumqttc::{AsyncClient, QoS};
@@ -20,11 +20,7 @@ pub struct TickerRouter {
 
 impl TickerRouter {
     pub fn new(pool: Arc<ConnectionPool>, mqtt_client: AsyncClient, topic_prefix: String) -> Self {
-        Self {
-            pool,
-            mqtt_client,
-            topic_prefix,
-        }
+        Self { pool, mqtt_client, topic_prefix }
     }
 }
 

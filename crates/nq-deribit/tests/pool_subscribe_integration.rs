@@ -76,22 +76,12 @@ async fn test_pool_subscribe_all_options() -> anyhow::Result<()> {
     // Fetch all active options
     let conn = pool.first_connection();
     let option_names = timeout(Duration::from_secs(30), fetch_options(conn, &currencies)).await??;
-    println!(
-        "Fetched {} options for {:?}",
-        option_names.len(),
-        currencies
-    );
-    assert!(
-        option_names.len() > 100,
-        "expected >100 options, got {}",
-        option_names.len()
-    );
+    println!("Fetched {} options for {:?}", option_names.len(), currencies);
+    assert!(option_names.len() > 100, "expected >100 options, got {}", option_names.len());
 
     // Build ticker channels: ticker.{name}.agg2
-    let ticker_channels: Vec<String> = option_names
-        .iter()
-        .map(|name| format!("ticker.{}.agg2", name))
-        .collect();
+    let ticker_channels: Vec<String> =
+        option_names.iter().map(|name| format!("ticker.{}.agg2", name)).collect();
 
     // Subscribe all tickers via pool — this is the code under test
     let start = tokio::time::Instant::now();
@@ -106,11 +96,7 @@ async fn test_pool_subscribe_all_options() -> anyhow::Result<()> {
     // ─── Verify distribution ───────────────────────────────────────
     let conns = pool.connection_runners();
     let total_tracked: usize = conns.iter().map(|c| c.channel_count()).sum();
-    println!(
-        "Connections: {}, total tracked channels: {}",
-        conns.len(),
-        total_tracked
-    );
+    println!("Connections: {}, total tracked channels: {}", conns.len(), total_tracked);
 
     for conn in &conns {
         let count = conn.channel_count();
@@ -125,7 +111,8 @@ async fn test_pool_subscribe_all_options() -> anyhow::Result<()> {
 
     // All tickers should be tracked
     assert_eq!(
-        total_tracked, ticker_channels.len(),
+        total_tracked,
+        ticker_channels.len(),
         "total tracked {} != subscribed {}",
         total_tracked,
         ticker_channels.len()
@@ -133,11 +120,7 @@ async fn test_pool_subscribe_all_options() -> anyhow::Result<()> {
 
     // Should have used multiple connections (1680 / 200 = 9)
     let expected_conns = (ticker_channels.len() + 199) / 200; // ceil division
-    println!(
-        "Expected ~{} connections, got {}",
-        expected_conns,
-        conns.len()
-    );
+    println!("Expected ~{} connections, got {}", expected_conns, conns.len());
     assert!(
         conns.len() >= 2,
         "expected >=2 connections for {} channels with cap=200, got {}",
@@ -165,14 +148,8 @@ async fn test_pool_subscribe_all_options() -> anyhow::Result<()> {
         }
     }
 
-    println!(
-        "Received {} subscription messages in ~10s window",
-        msg_count
-    );
-    assert!(
-        msg_count > 0,
-        "expected at least 1 subscription message, got 0 — data flow broken"
-    );
+    println!("Received {} subscription messages in ~10s window", msg_count);
+    assert!(msg_count > 0, "expected at least 1 subscription message, got 0 — data flow broken");
 
     // Cleanup
     pool.cancel_token().cancel();
