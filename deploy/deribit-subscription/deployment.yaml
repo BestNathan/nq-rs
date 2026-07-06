@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: deribit-subscription
-          image: ghcr.io/bestnathan/nq-rs/deribit-subscription:sha-da2cda4
+          image: ghcr.io/bestnathan/nq-rs/deribit-subscription:sha-088540c
           imagePullPolicy: Always
           env:
             - name: DEPLOY_ENV
