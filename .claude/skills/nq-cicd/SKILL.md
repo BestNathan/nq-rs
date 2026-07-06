@@ -27,12 +27,20 @@ git push → GitHub Actions → ghcr.io/bestnathan/nq-rs/<app>:sha-<hash>
 
 ## CI: GitHub Actions
 
-### 触发条件 (`.github/workflows/docker-build.yml`)
+### 工作流文件 (`.github/workflows/docker-build.yml`, name: `cicd`)
 
-- **Push** 到任意分支 → 构建并推送 `sha-<short-hash>` 标签
-- **Push** 到 `main` → 额外推送 `latest` 标签
-- **PR** 到 `main` → 构建但不推送（仅验证）
+### 触发条件
+
+- **Push** 到 `main` → 构建并推送镜像 + 自动更新 deploy 标签 + 清理旧镜像
 - **手动触发** (`workflow_dispatch`)
+
+### Jobs
+
+| Job | 说明 |
+|-----|------|
+| `build` | 为每个 app 构建 Docker 镜像，推送 `sha-<hash>` + `latest` 到 GHCR |
+| `update-deploy-tags` | 自动将 `deploy/<app>/deployment.yaml` 中的镜像标签替换为最新 `sha-<hash>`，commit + push（`[skip ci]` 避免循环触发） |
+| `cleanup-old-images` | 对每个 app 调用 GitHub API，保留最新 5 个非-`latest` 版本，删除更旧的 |
 
 ### 构建流程
 
@@ -50,9 +58,9 @@ git push → GitHub Actions → ghcr.io/bestnathan/nq-rs/<app>:sha-<hash>
 ### 镜像标签策略
 
 ```
-分支 push         → sha-abc1234
-main push         → sha-abc1234, latest
-PR                → (不推送)
+main push → sha-abc1234, latest
+           → 自动更新 deploy/*/deployment.yaml 中的镜像标签
+           → 清理旧镜像，保留 latest + 最近 5 个 sha 版本
 ```
 
 ## CD: ArgoCD (GitOps)
@@ -117,82 +125,26 @@ git commit -m "fix: description"
 git push origin <branch>
 ```
 
-### 2. 等待 CI 完成
+### 2. 创建 PR 并合并到 main
 
-GitHub Actions 自动构建并在镜像上打标签 `sha-<short-hash>`。
-在 Actions 页面查看构建状态或等待完成通知。
+合并到 `main` 后，CI 自动触发：
+1. 构建镜像，推送 `sha-<hash>` + `latest`
+2. 自动更新 `deploy/<app>/deployment.yaml` 中的镜像标签
+3. 清理旧镜像（保留最新 5 个）
 
-### 3. 更新镜像标签
+### 3. ArgoCD 自动同步
 
-编辑 `deploy/<app>/deployment.yaml`，将 `image` 字段更新为新标签：
+`deploy/` 变更推送后，ArgoCD 默认每 **3 分钟** 轮询一次 Git 仓库，自动同步。
 
-```yaml
-# 将：
-image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-be72b7e
-# 改为：
-image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-<new-hash>
-```
-
-提交更新：
+#### 手动触发同步（即时生效）
 
 ```bash
-git add deploy/<app>/deployment.yaml
-git commit -m "deploy: <app> <sha-hash>"
-git push origin main
-```
-
-### 4. 触发 ArgoCD 同步
-
-推送部署 commit 后，有两种方式触发同步：
-
-#### 方式 A：等待自动同步（默认）
-
-ArgoCD 默认每 **3 分钟** 轮询一次 Git 仓库。推送后最多等 3 分钟即可自动部署。
-
-```bash
-# 等待并观察 Pod 变化
-kubectl get pods -n nq -l app=option-monitor -w
-```
-
-#### 方式 B：手动触发同步（推荐，即时生效）
-
-如果不希望等待轮询，可以手动触发 ArgoCD 立即同步：
-
-**使用 argocd CLI（如已安装）：**
-
-```bash
-argocd app sync deribit-option-monitor
-# 或同步所有应用
-argocd app sync deribit-option-monitor deribit-subscription
-```
-
-**使用 kubectl 触发（无需 argocd CLI）：**
-
-通过给 ArgoCD Application 资源添加 `argocd.argoproj.io/sync-options=Force=true` 注解来触发同步：
-
-```bash
-# 方法 1：patch Application 触发同步
 kubectl patch application -n argocd deribit-option-monitor \
   --type merge \
   -p '{"operation": {"sync": {"revision": "main"}}}'
-
-# 方法 2：使用 kubectl argo rollout（需要 ArgoCD 插件）
-kubectl argo rollouts restart -n argocd deribit-option-monitor
 ```
 
-**检查同步状态：**
-
-```bash
-# 查看 ArgoCD Application 同步状态（kubectl 方式）
-kubectl get application -n argocd deribit-option-monitor \
-  -o jsonpath='{.status.sync.status}'
-
-# 等待同步完成
-kubectl wait --for=jsonpath='{.status.sync.status}'=Synced \
-  application -n argocd deribit-option-monitor --timeout=120s
-```
-
-### 5. 验证部署
+### 4. 验证部署
 
 ```bash
 # 查看 ArgoCD Application 同步状态
@@ -291,7 +243,7 @@ argocd app rollback deribit-option-monitor <revision-id>
    - `deployment.yaml` — Deployment 配置（镜像、环境变量、资源限制）
    - `app-secrets.yaml` — SealedSecret（如需要）
    - `kustomization.yaml` — 列出所有资源文件
-3. 在 `.github/workflows/docker-build.yml` 的 `matrix.app` 中添加新应用名
+3. 在 `.github/workflows/docker-build.yml` 的 `matrix.app`、`update-deploy-tags` 的 `APPS`、`cleanup-old-images` 的 `matrix.app` 中添加新应用名
 4. 提交推送，ArgoCD 自动发现
 
 ## 部署文件关键配置说明
@@ -325,7 +277,7 @@ resources:
 
 ```bash
 # CI 状态
-gh run list --workflow=docker-build.yml
+gh run list --workflow=cicd
 gh run watch <run-id>                      # 实时查看构建日志
 
 # ArgoCD — 触发同步
