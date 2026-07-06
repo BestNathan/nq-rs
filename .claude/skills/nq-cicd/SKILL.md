@@ -40,7 +40,7 @@ git push → GitHub Actions → ghcr.io/bestnathan/nq-rs/<app>:sha-<hash>
 |-----|------|
 | `build` | 为每个 app 构建 Docker 镜像，推送 `sha-<hash>` + `latest` 到 GHCR |
 | `update-deploy-tags` | 自动将 `deploy/<app>/deployment.yaml` 中的镜像标签替换为最新 `sha-<hash>`，commit + push（`[skip ci]` 避免循环触发） |
-| `cleanup-old-images` | 对每个 app 调用 GitHub API，保留最新 5 个非-`latest` 版本，删除更旧的 |
+| `cleanup-old-images` | 用 `actions/delete-package-versions@v5` 清理每个 app 的容器镜像,保留最新 5 个版本(`latest` 通过 `ignore-versions` 排除) |
 
 ### 构建流程
 
