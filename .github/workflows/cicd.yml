@@ -110,47 +110,9 @@ jobs:
 
     steps:
       - name: Delete old image versions (keep latest 5)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PACKAGE_NAME: ${{ github.repository }}/${{ matrix.app }}
-          IMAGE_OWNER: ${{ github.repository_owner }}
-        run: |
-          echo "=== Cleaning up old versions of ${PACKAGE_NAME} ==="
-
-          # URL-encode the / in package name
-          ENCODED=$(echo "${PACKAGE_NAME}" | sed 's|/|%2F|g')
-
-          # List all non-latest versions, sorted by creation date (oldest first)
-          VERSIONS=$(gh api \
-            "orgs/${IMAGE_OWNER}/packages/container/${ENCODED}/versions?per_page=100" \
-            --jq 'map(select(.metadata.container.tags | contains(["latest"]) | not))
-                  | sort_by(.created_at)
-                  | .[] | "\(.id) \(.metadata.container.tags | join(",")) \(.created_at)"')
-
-          if [ -z "$VERSIONS" ]; then
-            echo "No versions found"
-            exit 0
-          fi
-
-          TOTAL=$(echo "$VERSIONS" | wc -l)
-          KEEP=5
-          DELETE=$((TOTAL - KEEP))
-
-          if [ $DELETE -le 0 ]; then
-            echo "Only ${TOTAL} versions, nothing to delete (keep ${KEEP})"
-            exit 0
-          fi
-
-          echo "Found ${TOTAL} versions, will delete ${DELETE} oldest, keep ${KEEP}"
-
-          echo "$VERSIONS" | head -n $DELETE | while read -r line; do
-            ID=$(echo "$line" | awk '{print $1}')
-            TAGS=$(echo "$line" | awk '{print $2}')
-            echo "  Deleting version id=${ID} tags=${TAGS}"
-            gh api --silent \
-              -X DELETE \
-              "orgs/${IMAGE_OWNER}/packages/container/${ENCODED}/versions/${ID}" \
-              || echo "  Warning: failed to delete version ${ID}"
-          done
-
-          echo "=== Cleanup complete ==="
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ github.event.repository.name }}/${{ matrix.app }}
+          package-type: container
+          min-versions-to-keep: 5
+          ignore-versions: ^latest$
