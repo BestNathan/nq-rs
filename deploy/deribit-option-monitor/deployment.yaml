@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: option-monitor
-          image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-33165e7
+          image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-da2cda4
           imagePullPolicy: Always
           env:
             - name: DEPLOY_ENV
