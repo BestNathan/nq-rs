@@ -27,7 +27,7 @@ git push → GitHub Actions → ghcr.io/bestnathan/nq-rs/<app>:sha-<hash>
 
 ## CI: GitHub Actions
 
-### 工作流文件 (`.github/workflows/docker-build.yml`, name: `cicd`)
+### 工作流文件 (`.github/workflows/cicd.yml`, name: `cicd`)
 
 ### 触发条件
 
@@ -243,7 +243,7 @@ argocd app rollback deribit-option-monitor <revision-id>
    - `deployment.yaml` — Deployment 配置（镜像、环境变量、资源限制）
    - `app-secrets.yaml` — SealedSecret（如需要）
    - `kustomization.yaml` — 列出所有资源文件
-3. 在 `.github/workflows/docker-build.yml` 的 `matrix.app`、`update-deploy-tags` 的 `APPS`、`cleanup-old-images` 的 `matrix.app` 中添加新应用名
+3. 在 `.github/workflows/cicd.yml` 的 `matrix.app`、`update-deploy-tags` 的 `APPS`、`cleanup-old-images` 的 `matrix.app` 中添加新应用名
 4. 提交推送，ArgoCD 自动发现
 
 ## 部署文件关键配置说明
