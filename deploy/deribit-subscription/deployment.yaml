@@ -26,9 +26,9 @@ spec:
             - name: EMQX_HOST
               value: emqx-prod-nodeport.emqx.svc.cluster.local
             - name: ALL_PROXY
-              value: http://192.168.2.98:7891
+              value: http://192.168.2.98:7895
             - name: HTTPS_PROXY
-              value: http://192.168.2.98:7891
+              value: http://192.168.2.98:7895
             - name: NO_PROXY
               value: .svc,.svc.cluster.local,localhost,127.0.0.1,10.0.0.0/8
             - name: no_proxy
