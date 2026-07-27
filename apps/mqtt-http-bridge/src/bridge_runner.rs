@@ -15,8 +15,11 @@ use tokio::select;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+use nq_observability::metrics::KeyValue;
+
 use crate::bridge_handle::{BatchToSend, BridgeHandle};
 use crate::config::BridgeConfig;
+use crate::metrics::BRIDGE_METRICS;
 
 /// Generates a random alphanumeric string for unique MQTT client IDs.
 fn random_string(length: usize) -> String {
@@ -189,6 +192,7 @@ impl Runner for BridgeRunner {
                         Ok(Event::Incoming(Incoming::Publish(publish))) => {
                             let topic_value = publish.topic.clone();
                             let payload = String::from_utf8_lossy(&publish.payload).to_string();
+                            BRIDGE_METRICS.messages_received.add(1, &[]);
 
                             // Lock, push to handles, collect ready batches
                             let ready: Vec<(String, BatchToSend)> = {
@@ -405,6 +409,7 @@ async fn dispatch_batch(
     request_timeout_ms: u64,
     batch: &BatchToSend,
 ) {
+    let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_millis(request_timeout_ms);
 
     let req_builder = match batch.method.as_str() {
@@ -425,18 +430,31 @@ async fn dispatch_batch(
     match tokio::time::timeout(timeout, req.body(batch.body.clone()).send()).await {
         Ok(Ok(resp)) => {
             let status = resp.status();
+            let elapsed = start.elapsed().as_secs_f64() * 1000.0;
             if status.is_success() {
+                BRIDGE_METRICS.messages_forwarded.add(batch.message_count as u64, &[]);
+                BRIDGE_METRICS.batches_sent.add(1, &[]);
+                BRIDGE_METRICS.batch_size.record(batch.message_count as f64, &[]);
+                BRIDGE_METRICS.latency_ms.record(elapsed, &[]);
                 debug!(config_id = config_id, count = batch.message_count, "batch sent");
             } else {
+                let status_class = match status.as_u16() / 100 {
+                    4 => "4xx",
+                    5 => "5xx",
+                    _ => "other",
+                };
+                BRIDGE_METRICS.failures.add(1, &[KeyValue::new("status_class", status_class)]);
                 let preview: String =
                     resp.text().await.unwrap_or_default().chars().take(200).collect();
                 warn!(config_id = config_id, status = %status, body = preview, "HTTP error");
             }
         }
         Ok(Err(e)) => {
+            BRIDGE_METRICS.failures.add(1, &[KeyValue::new("status_class", "network")]);
             warn!(config_id = config_id, error = ?e, "HTTP request failed");
         }
         Err(_) => {
+            BRIDGE_METRICS.failures.add(1, &[KeyValue::new("status_class", "timeout")]);
             warn!(config_id = config_id, "request timeout");
         }
     }

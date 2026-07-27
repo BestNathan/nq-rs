@@ -76,7 +76,6 @@ impl BridgeConfig {
     }
 }
 
-#[expect(dead_code)]
 pub fn load_from_file(path: &str) -> Result<Vec<BridgeConfig>, anyhow::Error> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("failed to read config file {path}: {e}"))?;
