@@ -34,7 +34,7 @@ pub struct BridgeHandle {
 }
 
 impl BridgeHandle {
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[allow(dead_code)]
     pub fn new(config: BridgeConfig, http_client: Client) -> Result<Self> {
         let is_batch = config.is_batch_mode();
         let template = Template::parse(&config.template, is_batch)
@@ -55,7 +55,7 @@ impl BridgeHandle {
 
     /// Push a variable map into the buffer. Returns Some(batch) when buffer
     /// reaches batch.size, None if still accumulating.
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[allow(dead_code)]
     pub fn push(&mut self, vars: HashMap<String, String>) -> Option<BatchToSend> {
         if self.buffer.is_empty() {
             self.first_item_at = Some(Instant::now());
@@ -66,7 +66,7 @@ impl BridgeHandle {
     }
 
     /// True if the first buffered item has waited longer than interval_ms.
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[allow(dead_code)]
     pub fn should_flush_by_timer(&self) -> bool {
         if self.buffer.is_empty() {
             return false;
@@ -96,7 +96,7 @@ impl BridgeHandle {
     }
 
     /// For single mode: render immediately (no buffer).
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[allow(dead_code)]
     pub fn render_single(&self, vars: &HashMap<String, String>) -> BatchToSend {
         BatchToSend {
             url: self.config.http.url.clone(),

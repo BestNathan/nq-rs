@@ -49,7 +49,7 @@ pub struct BridgesFile {
     pub bridges: Vec<BridgeConfig>,
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
+#[allow(dead_code)]
 impl BridgeConfig {
     pub fn is_batch_mode(&self) -> bool {
         self.batch.size > 1

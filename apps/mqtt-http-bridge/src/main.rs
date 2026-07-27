@@ -1,10 +1,10 @@
 use anyhow::Result;
 
-mod config;
-mod template;
+mod api;
 mod bridge_handle;
 mod bridge_runner;
-mod api;
+mod config;
+mod template;
 
 #[tokio::main]
 async fn main() -> Result<()> {
