@@ -6,7 +6,7 @@ version = "0.1.0"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-axum = { version = "0.7", default-features = false, features = ["tokio"] }
+axum = { version = "0.7", default-features = false, features = ["tokio", "json", "http1"] }
 flume = { workspace = true }
 nq-app = { workspace = true }
 nq-env = { workspace = true }
