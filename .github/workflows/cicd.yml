@@ -108,6 +108,7 @@ jobs:
         app:
           - deribit-subscription
           - deribit-option-monitor
+          - mqtt-http-bridge
 
     steps:
       - name: Delete old image versions (keep latest 5)
