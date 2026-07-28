@@ -5,79 +5,76 @@ metadata:
   namespace: nq
 data:
   bridges.yaml: |
-    # ── Mirror EMQX production HTTP actions → TDengine dev ────────────
-    # Purpose: validate data accuracy before cutover from EMQX to bridge.
+    # ── Production TDengine mirror via EMQX republish ──────────
+    # Each config subscribes to t/bridge/deribit/<name> — flat JSON
+    # republished by EMQX rule SQL output. No nested field parsing needed.
+
     bridges:
 
-      # ── 1. Index Price (same as EMQX deribit_index_price) ──────────
-      - id: "deribit-index-price-dev"
+      # 1. Index Price (EMQX rule: deribit_index_price)
+      - id: "deribit-index-price"
         mqtt_topics:
-          - "t/deribit/subscription/deribit_price_index.btc_usd"
-          - "t/deribit/subscription/deribit_price_index.eth_usd"
+          - "t/bridge/deribit/index_price"
         http:
           url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
         template: |
-          deribit_index_price,index_name=${payload.params.data.index_name} price=${payload.params.data.price} ${payload.params.data.timestamp}000000
+          deribit_index_price,index_name=${payload.index_name} price=${payload.price} ${payload.timestamp}000000
         batch:
           size: 1
           interval_ms: 1000
         payload_parse: true
 
-      # ── 2. Volatility Index (same as EMQX deribit_volatility) ──────
-      - id: "deribit-volatility-dev"
+      # 2. Volatility Index (EMQX rule: deribit_volatility_index)
+      - id: "deribit-volatility"
         mqtt_topics:
-          - "t/deribit/subscription/deribit_volatility_index.btc_usd"
-          - "t/deribit/subscription/deribit_volatility_index.eth_usd"
+          - "t/bridge/deribit/volatility_index"
         http:
           url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
         template: |
-          deribit_volatility_index,index_name=${payload.params.data.index_name} volatility=${payload.params.data.volatility} ${payload.params.data.timestamp}000000
+          deribit_volatility_index,index_name=${payload.index_name} volatility=${payload.volatility} ${payload.timestamp}000000
         batch:
           size: 1
           interval_ms: 1000
         payload_parse: true
 
-      # ── 3. Option Ticker (same MQTT source as EMQX option_ticker) ──
-      # Raw fields only — computed fields (index_name, expiry_date_str,
-      # strike_price, type, last_price, settlement_price) are EMQX rule
-      # SQL outputs not available in raw MQTT payload.
-      - id: "option-ticker-dev"
+      # 3. Option Ticker (EMQX rule: option_ticker) — all 25 fields
+      - id: "option-ticker"
         mqtt_topics:
-          - "t/deribit/option_ticker/+"
+          - "t/bridge/deribit/option_ticker"
         http:
           url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
         template: |
-          option_ticker,instrument_name=${payload.instrument_name} best_bid_price=${payload.best_bid_price},best_ask_price=${payload.best_ask_price},mark_price=${payload.mark_price},mark_iv=${payload.mark_iv},bid_iv=${payload.bid_iv},ask_iv=${payload.ask_iv},open_interest=${payload.open_interest},index_price=${payload.index_price},underlying_price=${payload.underlying_price},delta=${payload.greeks.delta},gamma=${payload.greeks.gamma},theta=${payload.greeks.theta},vega=${payload.greeks.vega},rho=${payload.greeks.rho},state="${payload.state}" ${payload.timestamp}000000
-        batch:
-          size: 1
-          interval_ms: 1000
-        payload_parse: true
-
-      # ── 4. Index Price Batch (for high-throughput comparison) ───────
-      - id: "deribit-index-price-batch"
-        mqtt_topics:
-          - "t/deribit/subscription/deribit_price_index.btc_usd"
-          - "t/deribit/subscription/deribit_price_index.eth_usd"
-        http:
-          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
-          method: POST
-          headers:
-            Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
-        template: |
-          ${foreach}deribit_index_price,index_name=${payload.params.data.index_name} price=${payload.params.data.price} ${payload.params.data.timestamp}000000
-          ${end}
+          option_ticker,index_name=${payload.index_name},expiry_date=${payload.expiry_date_str},strike_price=${payload.strike_price},type=${payload.type},instrument_name=${payload.instrument_name} best_bid_price=${payload.best_bid_price},best_ask_price=${payload.best_ask_price},last_price=${payload.last_price},mark_price=${payload.mark_price},mark_iv=${payload.mark_iv},bid_iv=${payload.bid_iv},ask_iv=${payload.ask_iv},best_bid_amount=${payload.best_bid_amount},best_ask_amount=${payload.best_ask_amount},open_interest=${payload.open_interest},index_price=${payload.index_price},underlying_price=${payload.underlying_price},delta=${payload.delta},gamma=${payload.gamma},theta=${payload.theta},vega=${payload.vega},rho=${payload.rho},settlement_price=${payload.settlement_price},state="${payload.state}" ${payload.timestamp}000000
         batch:
           size: 100
-          interval_ms: 1000
-          max_inflight: 4
+          interval_ms: 500
+          max_inflight: 8
+          request_timeout_ms: 10000
+        payload_parse: true
+
+      # 4. Options Markprice (EMQX rule: deribit_options) — FOREACH expanded
+      - id: "deribit-options"
+        mqtt_topics:
+          - "t/bridge/deribit/options"
+        http:
+          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          method: POST
+          headers:
+            Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
+        template: |
+          deribit_options,index_name=${payload.index_name},expiry_date=${payload.expiry_date_str},strike_price=${payload.strike_price},type=${payload.type},instrument_name=${payload.instrument_name} mark_price=${payload.mark_price},iv=${payload.iv} ${payload.timestamp}000000
+        batch:
+          size: 100
+          interval_ms: 500
+          max_inflight: 8
           request_timeout_ms: 10000
         payload_parse: true
