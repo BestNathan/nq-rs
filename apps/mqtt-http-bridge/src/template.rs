@@ -90,9 +90,10 @@ impl Template {
         result.push_str(&render_segments(&self.before_foreach, &HashMap::new()));
 
         if let Some(ref fb) = self.foreach_block {
+            let sep = fb.separator.replace("\\n", "\n");
             for (i, vars) in messages.iter().enumerate() {
                 if i > 0 {
-                    result.push_str(&fb.separator);
+                    result.push_str(&sep);
                 }
                 result.push_str(&render_segments(&fb.inner, vars));
             }
@@ -247,5 +248,19 @@ mod tests {
     fn bare_dollar_is_literal() {
         let t = Template::parse("$notavar ${topic}", false).unwrap();
         assert_eq!(t.render_single(&vars("t", "p")), "$notavar t");
+    }
+
+    #[test]
+    fn batch_empty_separator() {
+        let t = Template::parse("${foreach}x=${topic}\n${end}", true).unwrap();
+        let msgs = vec![vars("a", "1"), vars("b", "2")];
+        assert_eq!(t.render_batch(&msgs), "x=a\nx=b\n");
+    }
+
+    #[test]
+    fn batch_backslash_n_separator() {
+        let t = Template::parse("${foreach \\n}x=${topic}${end}", true).unwrap();
+        let msgs = vec![vars("a", "1"), vars("b", "2")];
+        assert_eq!(t.render_batch(&msgs), "x=a\nx=b");
     }
 }

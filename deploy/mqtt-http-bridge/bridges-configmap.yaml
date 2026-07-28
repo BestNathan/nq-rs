@@ -40,8 +40,7 @@ data:
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
         template: |
-          ${foreach
-          }deribit_index_price,index_name=${payload.params.data.index_name} price=${payload.params.data.price} ${payload.params.data.timestamp}000000
+          ${foreach}deribit_index_price,index_name=${payload.params.data.index_name} price=${payload.params.data.price} ${payload.params.data.timestamp}000000
           ${end}
         batch:
           size: 100
