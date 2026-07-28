@@ -10,7 +10,49 @@ env:
   IMAGE_BASE: ${{ github.repository }}
 
 jobs:
+  # ── Detect which apps need rebuilding ──────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            deribit-subscription:
+              - 'Dockerfile'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'clippy.toml'
+              - 'rustfmt.toml'
+              - '.github/workflows/cicd.yml'
+              - 'apps/deribit-subscription/**'
+            deribit-option-monitor:
+              - 'Dockerfile'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'clippy.toml'
+              - 'rustfmt.toml'
+              - '.github/workflows/cicd.yml'
+              - 'apps/deribit-option-monitor/**'
+            mqtt-http-bridge:
+              - 'Dockerfile'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'clippy.toml'
+              - 'rustfmt.toml'
+              - '.github/workflows/cicd.yml'
+              - 'apps/mqtt-http-bridge/**'
+
+  # ── Build changed apps ─────────────────────────────────────────
   build:
+    needs: changes
+    if: needs.changes.outputs.apps != '[]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -18,10 +60,7 @@ jobs:
 
     strategy:
       matrix:
-        app:
-          - deribit-subscription
-          - deribit-option-monitor
-          - mqtt-http-bridge
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
 
     steps:
       - name: Checkout
@@ -58,8 +97,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # ── Update deploy manifests (only for apps that were built) ────
   update-deploy-tags:
-    needs: build
+    needs: [changes, build]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -69,13 +109,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Update image tags in deploy manifests
+      - name: Update image tags for built apps
         id: update
         run: |
           SHA=$(git rev-parse --short HEAD)
           echo "sha=${SHA}" >> $GITHUB_OUTPUT
-          APPS="deribit-subscription deribit-option-monitor mqtt-http-bridge"
-          for app in $APPS; do
+
+          # Only update deploy tags for apps that were actually built
+          APPS='${{ needs.changes.outputs.apps }}'
+          echo "Built apps: ${APPS}"
+
+          for app in $(echo "${APPS}" | jq -r '.[]'); do
             FILE="deploy/${app}/deployment.yaml"
             if [ -f "$FILE" ]; then
               sed -i "s|\(image:.*/${app}\):sha-[a-f0-9]*|\1:sha-${SHA}|" "$FILE"
@@ -96,6 +140,7 @@ jobs:
             git push
           fi
 
+  # ── Cleanup old images ─────────────────────────────────────────
   cleanup-old-images:
     needs: [build, update-deploy-tags]
     if: github.event_name == 'push'
