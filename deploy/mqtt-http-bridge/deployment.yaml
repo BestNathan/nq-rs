@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-http-bridge
+  labels:
+    app: mqtt-http-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqtt-http-bridge
+  template:
+    metadata:
+      labels:
+        app: mqtt-http-bridge
+    spec:
+      containers:
+        - name: mqtt-http-bridge
+          image: ghcr.io/bestnathan/nq-rs/mqtt-http-bridge:sha-d300355
+          imagePullPolicy: Always
+          env:
+            - name: RUST_LOG
+              value: info
+            - name: EMQX_HOST
+              value: emqx-prod-nodeport.emqx.svc.cluster.local
+            - name: BRIDGE_CONFIG_PATH
+              value: /etc/mqtt-http-bridge/bridges.yaml
+            - name: BRIDGE_API_PORT
+              value: "7896"
+          ports:
+            - name: http
+              containerPort: 7896
+              protocol: TCP
+          volumeMounts:
+            - name: bridges-config
+              mountPath: /etc/mqtt-http-bridge
+              readOnly: true
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+      volumes:
+        - name: bridges-config
+          configMap:
+            name: mqtt-http-bridge-config
+      imagePullSecrets:
+        - name: ghcr-bestnathan
+      nodeSelector:
+        kubernetes.io/arch: amd64

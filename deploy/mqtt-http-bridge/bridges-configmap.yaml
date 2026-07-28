@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mqtt-http-bridge-config
+  namespace: nq
+data:
+  bridges.yaml: |
+    # MQTT → HTTP bridge configurations
+    # Add bridge configs below. Changes to this ConfigMap require a pod restart.
+    bridges: []

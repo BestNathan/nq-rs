@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mqtt-http-bridge
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BestNathan/nq-rs.git
+    targetRevision: main
+    path: deploy/mqtt-http-bridge
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nq
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
