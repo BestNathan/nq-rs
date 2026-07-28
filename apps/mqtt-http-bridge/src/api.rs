@@ -36,6 +36,7 @@ impl Runner for ApiServer {
 
         let app = Router::new()
             .route("/health", get(health))
+            .route("/metrics", get(metrics))
             .route("/bridges", get(list_bridges).post(create_bridge))
             .route("/bridges/{id}", get(get_bridge).put(update_bridge).delete(delete_bridge))
             .layer(Extension(state));
@@ -157,4 +158,15 @@ async fn delete_bridge(
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(e) => Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": e.to_string()})))),
     }
+}
+
+// ── Prometheus /metrics endpoint ────────────────────────────────
+
+async fn metrics() -> (StatusCode, [(String, String); 1], String) {
+    let body = crate::metrics::prometheus_metrics_text();
+    (
+        StatusCode::OK,
+        [(String::from("content-type"), String::from("text/plain; version=0.0.4"))],
+        body,
+    )
 }

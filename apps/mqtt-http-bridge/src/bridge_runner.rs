@@ -15,8 +15,6 @@ use tokio::select;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use nq_observability::metrics::KeyValue;
-
 use crate::bridge_handle::{BatchToSend, BridgeHandle};
 use crate::config::BridgeConfig;
 use crate::metrics::BRIDGE_METRICS;
@@ -174,6 +172,8 @@ impl Runner for BridgeRunner {
 
         // Flush timer: check all handles periodically
         let mut flush_tick = tokio::time::interval(std::time::Duration::from_millis(200));
+        // Metrics reporting: print to stdout every 60s
+        let mut metrics_tick = tokio::time::interval(std::time::Duration::from_secs(60));
 
         // Subscribe to all initial topics
         {
@@ -202,7 +202,7 @@ impl Runner for BridgeRunner {
                         Ok(Event::Incoming(Incoming::Publish(publish))) => {
                             let topic_value = publish.topic.clone();
                             let payload = String::from_utf8_lossy(&publish.payload).to_string();
-                            BRIDGE_METRICS.messages_received.add(1, &[]);
+                            BRIDGE_METRICS.record_received("");
 
                             // Lock, push to handles, collect ready batches
                             let ready: Vec<(String, BatchToSend)> = {
@@ -281,6 +281,10 @@ impl Runner for BridgeRunner {
                             dispatch_batch(&client, &hid, timeout_ms, &batch).await;
                         });
                     }
+                },
+
+                _ = metrics_tick.tick() => {
+                    crate::metrics::report_metrics();
                 },
 
                 cmd = self.command_rx.recv_async() => {
@@ -442,29 +446,21 @@ async fn dispatch_batch(
             let status = resp.status();
             let elapsed = start.elapsed().as_secs_f64() * 1000.0;
             if status.is_success() {
-                BRIDGE_METRICS.messages_forwarded.add(batch.message_count as u64, &[]);
-                BRIDGE_METRICS.batches_sent.add(1, &[]);
-                BRIDGE_METRICS.batch_size.record(batch.message_count as f64, &[]);
-                BRIDGE_METRICS.latency_ms.record(elapsed, &[]);
+                BRIDGE_METRICS.record_http_success(config_id, batch.message_count as u64, elapsed);
                 debug!(config_id = config_id, count = batch.message_count, "batch sent");
             } else {
-                let status_class = match status.as_u16() / 100 {
-                    4 => "4xx",
-                    5 => "5xx",
-                    _ => "other",
-                };
-                BRIDGE_METRICS.failures.add(1, &[KeyValue::new("status_class", status_class)]);
+                BRIDGE_METRICS.record_http_failure(config_id, batch.message_count as u64);
                 let preview: String =
                     resp.text().await.unwrap_or_default().chars().take(200).collect();
                 warn!(config_id = config_id, status = %status, body = preview, "HTTP error");
             }
         }
         Ok(Err(e)) => {
-            BRIDGE_METRICS.failures.add(1, &[KeyValue::new("status_class", "network")]);
+            BRIDGE_METRICS.record_http_failure(config_id, batch.message_count as u64);
             warn!(config_id = config_id, error = ?e, "HTTP request failed");
         }
         Err(_) => {
-            BRIDGE_METRICS.failures.add(1, &[KeyValue::new("status_class", "timeout")]);
+            BRIDGE_METRICS.record_http_failure(config_id, batch.message_count as u64);
             warn!(config_id = config_id, "request timeout");
         }
     }
