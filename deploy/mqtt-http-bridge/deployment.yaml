@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: mqtt-http-bridge
-          image: ghcr.io/bestnathan/nq-rs/mqtt-http-bridge:sha-421de68
+          image: ghcr.io/bestnathan/nq-rs/mqtt-http-bridge:sha-fcbd16f
           imagePullPolicy: Always
           env:
             - name: RUST_LOG
