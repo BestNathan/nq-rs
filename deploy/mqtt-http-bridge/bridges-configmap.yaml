@@ -20,11 +20,12 @@ data:
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
-        template: |
-          deribit_index_price,index_name=${payload.index_name} price=${payload.price} ${payload.timestamp}000000
+        template: "${foreach}deribit_index_price,index_name=${payload.index_name} price=${payload.price} ${payload.timestamp}000000\n${end}"
         batch:
-          size: 1
-          interval_ms: 1000
+          size: 100
+          interval_ms: 500
+          max_inflight: 4
+          request_timeout_ms: 10000
         payload_parse: true
 
       # 2. Volatility Index (EMQX rule: deribit_volatility_index)
@@ -36,11 +37,12 @@ data:
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
-        template: |
-          deribit_volatility_index,index_name=${payload.index_name} volatility=${payload.volatility} ${payload.timestamp}000000
+        template: "${foreach}deribit_volatility_index,index_name=${payload.index_name} volatility=${payload.volatility} ${payload.timestamp}000000\n${end}"
         batch:
-          size: 1
-          interval_ms: 1000
+          size: 100
+          interval_ms: 500
+          max_inflight: 4
+          request_timeout_ms: 10000
         payload_parse: true
 
       # 3. Option Ticker (EMQX rule: option_ticker) — all 25 fields
