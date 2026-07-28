@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: deribit-subscription
-          image: ghcr.io/bestnathan/nq-rs/deribit-subscription:sha-84a8327
+          image: ghcr.io/bestnathan/nq-rs/deribit-subscription:sha-8d6793a
           imagePullPolicy: Always
           env:
             - name: RUST_LOG
