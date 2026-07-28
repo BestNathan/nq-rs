@@ -119,6 +119,18 @@ impl BridgeRunner {
     }
 
     /// Extract template variables from an incoming MQTT publish.
+    /// Match an incoming MQTT topic against registered patterns with wildcard support.
+    /// Supports MQTT 3.1.1 wildcards: `+` (single level), `#` (multi-level).
+    fn match_topic(topic: &str, patterns: &HashMap<String, Vec<String>>) -> Vec<String> {
+        let mut matched: Vec<String> = Vec::new();
+        for (pattern, handle_ids) in patterns {
+            if topic_matches(topic, pattern) {
+                matched.extend(handle_ids.iter().cloned());
+            }
+        }
+        matched
+    }
+
     fn extract_vars(topic: &str, payload: &str, payload_parse: bool) -> HashMap<String, String> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -140,6 +152,46 @@ impl BridgeRunner {
 
         vars
     }
+}
+
+/// MQTT 3.1.1 topic matching with wildcard support.
+///
+/// - `+` matches exactly one topic level.
+/// - `#` matches zero or more levels (must be the last character).
+/// - Otherwise, levels are matched as exact strings.
+fn topic_matches(topic: &str, pattern: &str) -> bool {
+    // Fast path: exact match
+    if pattern == topic {
+        return true;
+    }
+
+    // Fast path: pattern has no wildcards, no match
+    if !pattern.contains('+') && !pattern.contains('#') {
+        return false;
+    }
+
+    let topic_levels: Vec<&str> = topic.split('/').collect();
+    let pat_levels: Vec<&str> = pattern.split('/').collect();
+
+    for (i, pat) in pat_levels.iter().enumerate() {
+        if *pat == "#" {
+            return true; // multi-level wildcard matches everything after
+        }
+        if *pat == "+" {
+            // single-level wildcard must match something
+            if i >= topic_levels.len() {
+                return false;
+            }
+            continue;
+        }
+        // exact match
+        if i >= topic_levels.len() || topic_levels[i] != *pat {
+            return false;
+        }
+    }
+
+    // All pattern levels consumed — must match exactly
+    topic_levels.len() == pat_levels.len()
 }
 
 /// Recursively flatten a JSON value into dot-separated keys.
@@ -208,11 +260,8 @@ impl Runner for BridgeRunner {
                             let ready: Vec<(String, BatchToSend)> = {
                                 let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
                                 let mut batches = Vec::new();
-                                let handle_ids: Vec<String> = inner
-                                    .topic_index
-                                    .get(&topic_value)
-                                    .cloned()
-                                    .unwrap_or_default();
+                                let handle_ids: Vec<String> =
+                                    Self::match_topic(&topic_value, &inner.topic_index);
 
                                 for hid in handle_ids {
                                     if let Some(handle) = inner.handles.get_mut(&hid) {
