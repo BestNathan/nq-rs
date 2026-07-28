@@ -134,21 +134,31 @@ impl BridgeRunner {
 
         if payload_parse {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(payload) {
-                if let Some(obj) = val.as_object() {
-                    for (k, v) in obj {
-                        let flat_val = match v {
-                            serde_json::Value::String(s) => s.clone(),
-                            other => other.to_string(),
-                        };
-                        vars.insert(format!("payload.{k}"), flat_val);
-                    }
-                }
+                flatten_json(&mut vars, "payload", &val);
             } else {
                 warn!("payload_parse=true but payload is not valid JSON");
             }
         }
 
         vars
+    }
+}
+
+/// Recursively flatten a JSON value into dot-separated keys.
+fn flatten_json(vars: &mut HashMap<String, String>, prefix: &str, value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Object(obj) => {
+            for (k, v) in obj {
+                let key = format!("{prefix}.{k}");
+                flatten_json(vars, &key, v);
+            }
+        }
+        serde_json::Value::String(s) => {
+            vars.insert(prefix.to_string(), s.clone());
+        }
+        other => {
+            vars.insert(prefix.to_string(), other.to_string());
+        }
     }
 }
 
