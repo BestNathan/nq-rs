@@ -9,28 +9,31 @@ data:
     # Changes to this ConfigMap require a pod restart.
     bridges:
       # ── Deribit Index Price → TDengine dev ──────────────────────────
-      # Mirrors EMQX HTTP action "deribit_index_price" but targets dev TDengine.
-      # Requires flat JSON payload with keys: index_name, price, timestamp
+      # Subscribes to real Deribit topics (republished by EMQX per-channel).
+      # Uses nested JSON field extraction for params.data.*
       - id: "deribit-index-price-dev"
         mqtt_topics:
-          - "t/bridge/deribit/index_price"
+          - "t/deribit/subscription/deribit_price_index.btc_usd"
+          - "t/deribit/subscription/deribit_price_index.eth_usd"
         http:
           url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
         template: |
-          deribit_index_price,index_name=${payload.index_name} price=${payload.price} ${payload.timestamp}000000
+          deribit_index_price,index_name=${payload.params.data.index_name} price=${payload.params.data.price} ${payload.params.data.timestamp}000000
         batch:
           size: 1
           interval_ms: 1000
         payload_parse: true
 
-      # ── Deribit Tick Data → TDengine dev ────────────────────────────
-      # For high-frequency tick data, batch mode enabled
-      - id: "deribit-ticks-dev"
+      # ── Deribit Index Price Batch → TDengine dev ────────────────────
+      # Batch version: accumulates and sends in bulk.
+      # Template generates one line per item (newlines are literal in template)
+      - id: "deribit-index-price-batch"
         mqtt_topics:
-          - "t/bridge/deribit/ticker"
+          - "t/deribit/subscription/deribit_price_index.btc_usd"
+          - "t/deribit/subscription/deribit_price_index.eth_usd"
         http:
           url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
           method: POST
@@ -38,7 +41,7 @@ data:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
         template: |
           ${foreach
-          }${payload.index_name},price=${payload.price} ${payload.timestamp}000000
+          }deribit_index_price,index_name=${payload.params.data.index_name} price=${payload.params.data.price} ${payload.params.data.timestamp}000000
           ${end}
         batch:
           size: 100

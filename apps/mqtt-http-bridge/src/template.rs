@@ -40,7 +40,9 @@ pub struct Template {
 #[allow(dead_code)]
 impl Template {
     pub fn parse(source: &str, is_batch: bool) -> Result<Self, TemplateError> {
-        let foreach_start = source.find("${foreach ");
+        // Match ${foreach<sep>}  where <sep> can be any char (including newline or nothing).
+        // The old format required a space after "foreach" — now we support any separator.
+        let foreach_start = source.find("${foreach");
 
         match (foreach_start, is_batch) {
             (Some(_), false) => Err(TemplateError::ForeachInSingleMode),
@@ -54,14 +56,16 @@ impl Template {
                 let before = &source[..start];
                 let rest = &source[start..];
                 let sep_end = rest.find('}').ok_or(TemplateError::MissingEnd)?;
-                let foreach_len = "${foreach ".len();
-                let separator = rest[foreach_len..sep_end].to_string();
+                let foreach_len = "${foreach".len();
+                // Strip optional leading space for backward compat (old "${foreach ,}" syntax)
+                let sep_raw = rest.get(foreach_len..sep_end).unwrap_or("");
+                let separator = sep_raw.strip_prefix(' ').unwrap_or(sep_raw).to_string();
                 let after_marker = &rest[sep_end + 1..];
                 let end_pos = after_marker.find("${end}").ok_or(TemplateError::MissingEnd)?;
                 let inner_source = &after_marker[..end_pos];
                 let after_source = &after_marker[end_pos + "${end}".len()..];
 
-                if inner_source.contains("${foreach ") {
+                if inner_source.contains("${foreach") {
                     return Err(TemplateError::NestedForeach);
                 }
 
