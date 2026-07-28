@@ -16,23 +16,17 @@ spec:
     spec:
       containers:
         - name: option-monitor
-          image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-c7d58bc
+          image: ghcr.io/bestnathan/nq-rs/deribit-option-monitor:sha-d300355
           imagePullPolicy: Always
           env:
-            - name: DEPLOY_ENV
-              value: production
             - name: RUST_LOG
               value: info
             - name: EMQX_HOST
               value: emqx-prod-nodeport.emqx.svc.cluster.local
             - name: ALL_PROXY
-              value: http://192.168.2.98:7895
+              value: http://192.168.2.98:8890
             - name: HTTPS_PROXY
-              value: http://192.168.2.98:7895
-            - name: NO_PROXY
-              value: .svc,.svc.cluster.local,localhost,127.0.0.1,10.0.0.0/8
-            - name: no_proxy
-              value: .svc,.svc.cluster.local,localhost,127.0.0.1,10.0.0.0/8
+              value: http://192.168.2.98:8890
             - name: DERIBIT_OPTION_CURRENCIES
               value: BTC,ETH
             - name: DERIBIT_OPTION_TICKER_INTERVAL

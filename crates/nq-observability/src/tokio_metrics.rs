@@ -45,8 +45,7 @@ fn record_metrics(
         .u64_gauge("tokio_global_queue_depth")
         .with_description("Tasks scheduled in the runtime's global queue")
         .build();
-    let workers =
-        m.u64_gauge("tokio_workers").with_description("Number of worker threads").build();
+    let workers = m.u64_gauge("tokio_workers").with_description("Number of worker threads").build();
 
     // ── Counters ─────────────────────────────────────────────────────
     let busy_secs = m

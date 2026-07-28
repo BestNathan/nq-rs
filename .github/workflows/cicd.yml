@@ -21,6 +21,7 @@ jobs:
         app:
           - deribit-subscription
           - deribit-option-monitor
+          - mqtt-http-bridge
 
     steps:
       - name: Checkout
@@ -73,7 +74,7 @@ jobs:
         run: |
           SHA=$(git rev-parse --short HEAD)
           echo "sha=${SHA}" >> $GITHUB_OUTPUT
-          APPS="deribit-subscription deribit-option-monitor"
+          APPS="deribit-subscription deribit-option-monitor mqtt-http-bridge"
           for app in $APPS; do
             FILE="deploy/${app}/deployment.yaml"
             if [ -f "$FILE" ]; then

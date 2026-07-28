@@ -1,0 +1,23 @@
+[package]
+edition = "2024"
+name = "mqtt-http-bridge"
+version = "0.1.0"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { version = "0.7", default-features = false, features = ["tokio", "json", "http1"] }
+flume = { workspace = true }
+nq-app = { workspace = true }
+nq-env = { workspace = true }
+nq-observability = { workspace = true }
+rand = "0.9.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+rumqttc = "0.24.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
