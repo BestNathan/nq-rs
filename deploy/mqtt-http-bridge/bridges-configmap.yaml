@@ -52,9 +52,7 @@ data:
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
-        template: |
-          ${foreach}option_ticker,index_name=${payload.index_name},expiry_date=${payload.expiry_date_str},strike_price=${payload.strike_price},type=${payload.type},instrument_name=${payload.instrument_name} best_bid_price=${payload.best_bid_price},best_ask_price=${payload.best_ask_price},last_price=${payload.last_price},mark_price=${payload.mark_price},mark_iv=${payload.mark_iv},bid_iv=${payload.bid_iv},ask_iv=${payload.ask_iv},best_bid_amount=${payload.best_bid_amount},best_ask_amount=${payload.best_ask_amount},open_interest=${payload.open_interest},index_price=${payload.index_price},underlying_price=${payload.underlying_price},delta=${payload.delta},gamma=${payload.gamma},theta=${payload.theta},vega=${payload.vega},rho=${payload.rho},settlement_price=${payload.settlement_price},state="${payload.state}" ${payload.timestamp}000000
-          ${end}
+        template: "${foreach}option_ticker,index_name=${payload.index_name},expiry_date=${payload.expiry_date_str},strike_price=${payload.strike_price},type=${payload.type},instrument_name=${payload.instrument_name} best_bid_price=${payload.best_bid_price},best_ask_price=${payload.best_ask_price},last_price=${payload.last_price},mark_price=${payload.mark_price},mark_iv=${payload.mark_iv},bid_iv=${payload.bid_iv},ask_iv=${payload.ask_iv},best_bid_amount=${payload.best_bid_amount},best_ask_amount=${payload.best_ask_amount},open_interest=${payload.open_interest},index_price=${payload.index_price},underlying_price=${payload.underlying_price},delta=${payload.delta},gamma=${payload.gamma},theta=${payload.theta},vega=${payload.vega},rho=${payload.rho},settlement_price=${payload.settlement_price},state=\"${payload.state}\" ${payload.timestamp}000000\n${end}"
         batch:
           size: 100
           interval_ms: 500
@@ -71,9 +69,7 @@ data:
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
-        template: |
-          ${foreach}deribit_options,index_name=${payload.index_name},expiry_date=${payload.expiry_date_str},strike_price=${payload.strike_price},type=${payload.type},instrument_name=${payload.instrument_name} mark_price=${payload.mark_price},iv=${payload.iv} ${payload.timestamp}000000
-          ${end}
+        template: "${foreach}deribit_options,index_name=${payload.index_name},expiry_date=${payload.expiry_date_str},strike_price=${payload.strike_price},type=${payload.type},instrument_name=${payload.instrument_name} mark_price=${payload.mark_price},iv=${payload.iv} ${payload.timestamp}000000\n${end}"
         batch:
           size: 100
           interval_ms: 500
