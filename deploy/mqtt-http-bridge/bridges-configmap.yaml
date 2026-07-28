@@ -6,5 +6,43 @@ metadata:
 data:
   bridges.yaml: |
     # MQTT → HTTP bridge configurations
-    # Add bridge configs below. Changes to this ConfigMap require a pod restart.
-    bridges: []
+    # Changes to this ConfigMap require a pod restart.
+    bridges:
+      # ── Deribit Index Price → TDengine dev ──────────────────────────
+      # Mirrors EMQX HTTP action "deribit_index_price" but targets dev TDengine.
+      # Requires flat JSON payload with keys: index_name, price, timestamp
+      - id: "deribit-index-price-dev"
+        mqtt_topics:
+          - "t/bridge/deribit/index_price"
+        http:
+          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          method: POST
+          headers:
+            Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
+        template: |
+          deribit_index_price,index_name=${payload.index_name} price=${payload.price} ${payload.timestamp}000000
+        batch:
+          size: 1
+          interval_ms: 1000
+        payload_parse: true
+
+      # ── Deribit Tick Data → TDengine dev ────────────────────────────
+      # For high-frequency tick data, batch mode enabled
+      - id: "deribit-ticks-dev"
+        mqtt_topics:
+          - "t/bridge/deribit/ticker"
+        http:
+          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          method: POST
+          headers:
+            Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
+        template: |
+          ${foreach
+          }${payload.index_name},price=${payload.price} ${payload.timestamp}000000
+          ${end}
+        batch:
+          size: 100
+          interval_ms: 1000
+          max_inflight: 4
+          request_timeout_ms: 10000
+        payload_parse: true
