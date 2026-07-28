@@ -5,12 +5,11 @@ metadata:
   namespace: nq
 data:
   bridges.yaml: |
-    # MQTT → HTTP bridge configurations
-    # Changes to this ConfigMap require a pod restart.
+    # ── Mirror EMQX production HTTP actions → TDengine dev ────────────
+    # Purpose: validate data accuracy before cutover from EMQX to bridge.
     bridges:
-      # ── Deribit Index Price → TDengine dev ──────────────────────────
-      # Subscribes to real Deribit topics (republished by EMQX per-channel).
-      # Uses nested JSON field extraction for params.data.*
+
+      # ── 1. Index Price (same as EMQX deribit_index_price) ──────────
       - id: "deribit-index-price-dev"
         mqtt_topics:
           - "t/deribit/subscription/deribit_price_index.btc_usd"
@@ -27,9 +26,43 @@ data:
           interval_ms: 1000
         payload_parse: true
 
-      # ── Deribit Index Price Batch → TDengine dev ────────────────────
-      # Batch version: accumulates and sends in bulk.
-      # Template generates one line per item (newlines are literal in template)
+      # ── 2. Volatility Index (same as EMQX deribit_volatility) ──────
+      - id: "deribit-volatility-dev"
+        mqtt_topics:
+          - "t/deribit/subscription/deribit_volatility_index.btc_usd"
+          - "t/deribit/subscription/deribit_volatility_index.eth_usd"
+        http:
+          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          method: POST
+          headers:
+            Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
+        template: |
+          deribit_volatility_index,index_name=${payload.params.data.index_name} volatility=${payload.params.data.volatility} ${payload.params.data.timestamp}000000
+        batch:
+          size: 1
+          interval_ms: 1000
+        payload_parse: true
+
+      # ── 3. Option Ticker (same MQTT source as EMQX option_ticker) ──
+      # Raw fields only — computed fields (index_name, expiry_date_str,
+      # strike_price, type, last_price, settlement_price) are EMQX rule
+      # SQL outputs not available in raw MQTT payload.
+      - id: "option-ticker-dev"
+        mqtt_topics:
+          - "t/deribit/option_ticker/+"
+        http:
+          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          method: POST
+          headers:
+            Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
+        template: |
+          option_ticker,instrument_name=${payload.instrument_name} best_bid_price=${payload.best_bid_price},best_ask_price=${payload.best_ask_price},mark_price=${payload.mark_price},mark_iv=${payload.mark_iv},bid_iv=${payload.bid_iv},ask_iv=${payload.ask_iv},open_interest=${payload.open_interest},index_price=${payload.index_price},underlying_price=${payload.underlying_price},delta=${payload.greeks.delta},gamma=${payload.greeks.gamma},theta=${payload.greeks.theta},vega=${payload.greeks.vega},rho=${payload.greeks.rho},state="${payload.state}" ${payload.timestamp}000000
+        batch:
+          size: 1
+          interval_ms: 1000
+        payload_parse: true
+
+      # ── 4. Index Price Batch (for high-throughput comparison) ───────
       - id: "deribit-index-price-batch"
         mqtt_topics:
           - "t/deribit/subscription/deribit_price_index.btc_usd"
