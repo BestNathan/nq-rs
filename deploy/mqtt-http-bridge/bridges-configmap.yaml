@@ -16,7 +16,7 @@ data:
         mqtt_topics:
           - "t/bridge/deribit/index_price"
         http:
-          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          url: "http://tdengine-prod-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit"
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
@@ -33,7 +33,7 @@ data:
         mqtt_topics:
           - "t/bridge/deribit/volatility_index"
         http:
-          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          url: "http://tdengine-prod-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit"
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
@@ -50,7 +50,7 @@ data:
         mqtt_topics:
           - "t/bridge/deribit/option_ticker"
         http:
-          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          url: "http://tdengine-prod-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit"
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
@@ -67,7 +67,7 @@ data:
         mqtt_topics:
           - "t/bridge/deribit/options"
         http:
-          url: "http://tdengine-dev-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit_dev"
+          url: "http://tdengine-prod-adapter.tdengine.svc.cluster.local:6041/influxdb/v1/write?db=deribit"
           method: POST
           headers:
             Authorization: "Basic cm9vdDp0YW9zZGF0YQ=="
