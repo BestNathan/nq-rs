@@ -24,9 +24,9 @@ spec:
             - name: EMQX_HOST
               value: emqx-prod-nodeport.emqx.svc.cluster.local
             - name: ALL_PROXY
-              value: http://192.168.2.98:8890
+              value: http://192.168.2.98:7895
             - name: HTTPS_PROXY
-              value: http://192.168.2.98:8890
+              value: http://192.168.2.98:7895
             - name: DERIBIT_OPTION_CURRENCIES
               value: BTC,ETH
             - name: DERIBIT_OPTION_TICKER_INTERVAL
